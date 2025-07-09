@@ -1,0 +1,151 @@
+// ==UserScript==
+// @name         Ghost Trade Deposit
+// @namespace    MonChoon_
+// @version      1.0
+// @description  Auto-submits trade after clicking the $ button to deposit maximum money. Compliant with Torn scripting rules.
+// @license      MIT
+// @author       MonChoon [2250591]
+// @match        https://www.torn.com/trade.php*
+// @grant        window.onurlchange
+// @downloadURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit.user.js
+// @updateURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit.user.js
+// ==/UserScript==
+
+function initializeAutoDeposit() {
+    // Wait for the page to load completely
+    setTimeout(() => {
+        addAutoDepositListener();
+    }, 500);
+}
+
+function addAutoDepositListener() {
+    // Target the span that users actually click on (contains the $ symbol)
+    const maxButton = document.querySelector('.input-money-symbol');
+
+    if (maxButton) {
+        // Remove any existing listeners to avoid duplicates
+        maxButton.removeEventListener('click', autoDepositHandler);
+
+        // Add the auto-deposit listener
+        maxButton.addEventListener('click', autoDepositHandler);
+        console.log("Ghost Trade Deposit: Auto-deposit listener added");
+    } else {
+        console.log("Ghost Trade Deposit: $ button (.input-money-symbol) not found, retrying...");
+        // Retry after a short delay
+        setTimeout(addAutoDepositListener, 1000);
+    }
+}
+
+function autoDepositHandler(event) {
+    // Get the input elements
+    const inputVisible = document.querySelector(".user-id.input-money");
+    const inputHidden = document.querySelectorAll(".user-id.input-money")[1];
+
+    if (!inputVisible || !inputHidden) {
+        console.log("Ghost Trade Deposit ERROR: Could not find input elements!");
+        return;
+    }
+
+    // Read current value before the $ button action
+    const initialValue = parseInt(inputHidden.value) || 0;
+
+    // Function to check if value has changed and submit if it has
+    function checkValueAndSubmit() {
+        const currentValue = parseInt(inputHidden.value) || 0;
+
+        if (currentValue !== initialValue && currentValue > 0) {
+            const changeButton = document.querySelector('input[type="submit"][value="Change"]');
+            if (changeButton) {
+                console.log("Ghost Trade Deposit: Auto-submitting deposit");
+                changeButton.click();
+                return true; // Successfully submitted
+            } else {
+                console.log("Ghost Trade Deposit ERROR: Change button not found!");
+                return false;
+            }
+        }
+        return false; // No change yet
+    }
+
+    // Monitor for value changes with optimized polling
+    let attempts = 0;
+    const maxAttempts = 10; // Check for up to 500ms (10 * 50ms) - optimized from 1000ms
+
+    const valueMonitor = setInterval(() => {
+        attempts++;
+        const submitted = checkValueAndSubmit();
+
+        const currentValue = parseInt(inputHidden.value) || 0;
+
+        // Stop monitoring if value changed and submitted, or we've tried too many times
+        if (submitted || currentValue !== initialValue || attempts >= maxAttempts) {
+            clearInterval(valueMonitor);
+
+            if (attempts >= maxAttempts && currentValue === initialValue) {
+                console.log("Ghost Trade Deposit ERROR: Timeout - Value never changed after clicking $ button (500ms)");
+            }
+        }
+    }, 50); // Check every 50ms
+}
+
+function checkAndInitialize() {
+    // Check if we're on the correct trade page section
+    if (window.location.href.includes("trade.php") &&
+        (window.location.href.includes("step=addmoney") || window.location.href.includes("step=initiateTrade"))) {
+
+        // Check if the required elements exist
+        const inputElements = document.querySelectorAll('.user-id.input-money');
+        const maxButton = document.querySelector('.input-money-symbol');
+
+        if (inputElements.length >= 2 && maxButton) {
+            initializeAutoDeposit();
+        } else {
+            // Retry after a short delay
+            setTimeout(checkAndInitialize, 500);
+        }
+    }
+}
+
+// Initialize when the page loads
+if (window.location.href.includes("trade.php")) {
+    checkAndInitialize();
+}
+
+// Handle URL changes (for SPA navigation)
+if (window.onurlchange === null) {
+    window.addEventListener('urlchange', () => {
+        if (window.location.href.includes("trade.php")) {
+            setTimeout(checkAndInitialize, 300);
+        }
+    });
+}
+
+// Also handle regular page loads
+window.addEventListener('load', () => {
+    if (window.location.href.includes("trade.php")) {
+        checkAndInitialize();
+    }
+});
+
+// Handle dynamic content loading
+const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+        if (mutation.addedNodes.length > 0) {
+            // Check if the money input or max button was added
+            const maxButton = document.querySelector('.input-money-symbol');
+            const inputElements = document.querySelectorAll('.user-id.input-money');
+
+            if (maxButton && inputElements.length >= 2 &&
+                !maxButton.hasAttribute('data-auto-deposit-listener')) {
+                maxButton.setAttribute('data-auto-deposit-listener', 'true');
+                addAutoDepositListener();
+            }
+        }
+    });
+});
+
+// Start observing
+observer.observe(document.body, {
+    childList: true,
+    subtree: true
+});
