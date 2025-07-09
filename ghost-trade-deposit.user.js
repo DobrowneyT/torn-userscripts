@@ -7,8 +7,8 @@
 // @author       MonChoon [2250591]
 // @match        https://www.torn.com/trade.php*
 // @grant        window.onurlchange
-// @downloadURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit-event.user.js
-// @updateURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit-event.user.js
+// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/ghost-trade-deposit.user.js
+// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/ghost-trade-deposit.user.js
 // ==/UserScript==
 
 function initializeAutoDeposit() {
