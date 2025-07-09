@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Ghost Trade Deposit
 // @namespace    MonChoon_
-// @version      1.0
-// @description  Auto-submits trade after clicking the $ button to deposit maximum money. Compliant with Torn scripting rules.
+// @version      1.1
+// @description  Auto-submits trade after clicking the $ button. Compliant with Torn scripting rules.
 // @license      MIT
 // @author       MonChoon [2250591]
 // @match        https://www.torn.com/trade.php*
 // @grant        window.onurlchange
-// @downloadURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit.user.js
-// @updateURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit.user.js
+// @downloadURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit-event.user.js
+// @updateURL https://github.com/MonChoon/torn-userscripts/raw/main/ghost-trade-deposit-event.user.js
 // ==/UserScript==
 
 function initializeAutoDeposit() {
@@ -28,64 +28,98 @@ function addAutoDepositListener() {
 
         // Add the auto-deposit listener
         maxButton.addEventListener('click', autoDepositHandler);
-        console.log("Ghost Trade Deposit: Auto-deposit listener added");
     } else {
-        console.log("Ghost Trade Deposit: $ button (.input-money-symbol) not found, retrying...");
+        console.log("Ghost Trade Deposit (Event): $ button (.input-money-symbol) not found, retrying...");
         // Retry after a short delay
         setTimeout(addAutoDepositListener, 1000);
     }
 }
 
+// Track if listeners are currently active to prevent spam-clicking issues
+let inputListenersActive = false;
+
 function autoDepositHandler(event) {
+
+    // Prevent multiple simultaneous listener attachments
+    if (inputListenersActive) {
+        return;
+    }
+
     // Get the input elements
     const inputVisible = document.querySelector(".user-id.input-money");
     const inputHidden = document.querySelectorAll(".user-id.input-money")[1];
 
+
     if (!inputVisible || !inputHidden) {
-        console.log("Ghost Trade Deposit ERROR: Could not find input elements!");
+        console.log("Ghost Trade Deposit (Event) ERROR: Could not find input elements!");
         return;
     }
 
     // Read current value before the $ button action
     const initialValue = parseInt(inputHidden.value) || 0;
 
-    // Function to check if value has changed and submit if it has
-    function checkValueAndSubmit() {
+    // Mark listeners as active
+    inputListenersActive = true;
+
+    // Function to submit the form
+    function submitDeposit() {
         const currentValue = parseInt(inputHidden.value) || 0;
 
         if (currentValue !== initialValue && currentValue > 0) {
             const changeButton = document.querySelector('input[type="submit"][value="Change"]');
             if (changeButton) {
-                console.log("Ghost Trade Deposit: Auto-submitting deposit");
                 changeButton.click();
-                return true; // Successfully submitted
+                return true;
             } else {
-                console.log("Ghost Trade Deposit ERROR: Change button not found!");
+                console.log("Ghost Trade Deposit (Event) ERROR: Change button not found!");
                 return false;
             }
+        } else {
+            return false;
         }
-        return false; // No change yet
     }
 
-    // Monitor for value changes with optimized polling
-    let attempts = 0;
-    const maxAttempts = 10; // Check for up to 500ms (10 * 50ms) - optimized from 1000ms
+    // Function to clean up and reset
+    function cleanupAndReset() {
+        inputListenersActive = false;
+    }
 
-    const valueMonitor = setInterval(() => {
-        attempts++;
-        const submitted = checkValueAndSubmit();
+    // Listen for the 'input' event on both input fields (interrupt-style)
+    function createInputListener(inputElement, elementName) {
+        const listener = function(e) {
+            const submitted = submitDeposit();
 
-        const currentValue = parseInt(inputHidden.value) || 0;
+            // Always clean up and reset after any event fires
+            cleanupAndReset();
 
-        // Stop monitoring if value changed and submitted, or we've tried too many times
-        if (submitted || currentValue !== initialValue || attempts >= maxAttempts) {
-            clearInterval(valueMonitor);
+            // Remove the listener after use
+            inputElement.removeEventListener('input', listener);
+        };
 
-            if (attempts >= maxAttempts && currentValue === initialValue) {
-                console.log("Ghost Trade Deposit ERROR: Timeout - Value never changed after clicking $ button (500ms)");
-            }
-        }
-    }, 50); // Check every 50ms
+        inputElement.addEventListener('input', listener);
+    }
+
+    // Also listen for 'change' events as a backup
+    function createChangeListener(inputElement, elementName) {
+        const listener = function(e) {
+            const submitted = submitDeposit();
+
+            // Always clean up and reset after any event fires
+            cleanupAndReset();
+
+            // Remove the listener after use
+            inputElement.removeEventListener('change', listener);
+        };
+
+        inputElement.addEventListener('change', listener);
+    }
+
+    // Attach listeners to both input elements
+    createInputListener(inputVisible, "visible input");
+    createInputListener(inputHidden, "hidden input");
+    createChangeListener(inputVisible, "visible input");
+    createChangeListener(inputHidden, "hidden input");
+
 }
 
 function checkAndInitialize() {
