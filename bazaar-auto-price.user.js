@@ -57,7 +57,7 @@
  * =============================================================================
  */
 
-const apikey = 'LGa2faZu3WxR9ioO'; // ← EDIT THIS LINE WITH YOUR API KEY
+const apikey = 'YOUR_LIMITED-ACCESS_API_KEY'; // ← EDIT THIS LINE WITH YOUR API KEY
 
 // =============================================================================
 // DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING
