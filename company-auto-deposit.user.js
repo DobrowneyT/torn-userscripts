@@ -152,7 +152,6 @@ function checkAndInitialize() {
             if (inputElements.length >= 2 && maxButton) {
                 initializeAutoDeposit();
             } else {
-                console.log("Company Auto Deposit: Required elements not ready, retrying...");
                 // Retry after a short delay
                 setTimeout(checkAndInitialize, 500);
             }
