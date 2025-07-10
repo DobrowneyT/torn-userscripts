@@ -7,8 +7,8 @@
 // @author       MonChoon [2250591]
 // @match        https://www.torn.com/factions.php*
 // @grant        window.onurlchange
-// @downloadURL https://github.com/MonChoon/torn-userscripts/raw/main/faction-bank-auto-deposit.user.js
-// @updateURL https://github.com/MonChoon/torn-userscripts/raw/main/faction-bank-auto-deposit.user.js
+// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/faction-bank-auto-deposit.user.js
+// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/faction-bank-auto-deposit.user.js
 // ==/UserScript==
 
 let inputListenersActive = false;
