@@ -16,16 +16,17 @@
     'use strict';
 
     // Configuration - Replace with your published Google Sheet CSV URL
-    const REQUIREMENTS_CSV_URL = 'https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/export?format=csv&id=YOUR_SHEET_ID&gid=0';
-    
+    // Expected format: Two-row format (Crime row, Role row, CPR row)
+    const REQUIREMENTS_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSb0W9iwm3noNzJVoUArG4VSbeSzpgWlMB9ObhYxU8FdNMzWEhIC852N2SHSWbb-pKFdrBgMwxQr6x-/pub?gid=812446557&single=true&output=csv';
+
     // Cache settings
     const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes in milliseconds
     const CACHE_KEY = 'oc_crime_requirements';
     const CACHE_TIMESTAMP_KEY = 'oc_crime_requirements_timestamp';
 
     const CRIMES_TAB = '#/tab=crimes';
-    
-    // Fallback data in case the sheet is unavailable
+
+    // Updated fallback data
     const FALLBACK_REQUIREMENTS = {
         'Blast from the Past': {'Bomber': 75, 'Engineer': 75, 'Hacker': 70, 'Muscle': 75, 'Picklock #1': 70, 'Picklock #2': 70},
         'Break the Bank': {'Robber': 60, 'Thief #1': 50, 'Thief #2': 65, 'Muscle #1': 60, 'Muscle #2': 60, 'Muscle #3': 65},
@@ -37,32 +38,39 @@
 
     let crimeRequirements = FALLBACK_REQUIREMENTS;
 
-    // Parse CSV data into our requirements object
+    // Parse CSV data (two-row format: Crime row, Role row, CPR row)
     function parseCSVToRequirements(csvText) {
         const lines = csvText.trim().split('\n');
-        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
         const requirements = {};
 
-        for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
-            const crimeName = values[0];
-            
-            if (!crimeName) continue;
-            
+        // Process in groups of 3 lines (Crime, Role, CPR)
+        for (let i = 0; i < lines.length; i += 3) {
+            if (i + 2 >= lines.length) break;
+
+            const crimeRow = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            const roleRow = lines[i + 1].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            const cprRow = lines[i + 2].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+
+            // First cell should be "Crime", second cell is the crime name
+            if (crimeRow[0] !== 'Crime' || !crimeRow[1]) continue;
+
+            const crimeName = crimeRow[1];
             requirements[crimeName] = {};
-            
-            // Skip the first column (crime name) and process the rest
-            for (let j = 1; j < headers.length && j < values.length; j++) {
-                const roleName = headers[j];
-                const requirement = values[j];
-                
-                // Only add non-empty requirements
-                if (requirement && !isNaN(requirement) && parseInt(requirement) > 0) {
-                    requirements[crimeName][roleName] = parseInt(requirement);
+
+            // Process roles (skip first column which is "Role" or "CPR")
+            for (let j = 1; j < roleRow.length && j < cprRow.length; j++) {
+                const roleName = roleRow[j];
+                const cprValue = cprRow[j];
+
+                if (roleName && cprValue && !isNaN(cprValue)) {
+                    const cpr = parseInt(cprValue);
+                    if (cpr >= 0) { // Allow 0 values for roles like "Picklock #2"
+                        requirements[crimeName][roleName] = cpr;
+                    }
                 }
             }
         }
-        
+
         return requirements;
     }
 
@@ -71,7 +79,7 @@
         try {
             const timestamp = localStorage.getItem(CACHE_TIMESTAMP_KEY);
             const cached = localStorage.getItem(CACHE_KEY);
-            
+
             if (timestamp && cached) {
                 const cacheAge = Date.now() - parseInt(timestamp);
                 if (cacheAge < CACHE_DURATION) {
@@ -105,7 +113,7 @@
             }
 
             console.log('OC Requirements: Fetching from Google Sheets...');
-            
+
             GM_xmlhttpRequest({
                 method: 'GET',
                 url: REQUIREMENTS_CSV_URL,
@@ -116,6 +124,7 @@
                             const requirements = parseCSVToRequirements(response.responseText);
                             setCachedRequirements(requirements);
                             console.log('OC Requirements: Successfully loaded from Google Sheets');
+                            console.log('Loaded crimes:', Object.keys(requirements));
                             resolve(requirements);
                         } else {
                             throw new Error(`HTTP ${response.status}`);
@@ -147,29 +156,33 @@
 
             const crimeTitle = titleElement.textContent.trim();
             const requirements = crimeRequirements[crimeTitle];
-            
+
             if (!requirements) return;
 
             scenario.querySelectorAll('[class^=wrapper___] > [class^=wrapper___]').forEach(role => {
                 const slotTitleElement = role.querySelector('[class^=slotHeader___] > [class^=title___]');
                 const slotSkillElement = role.querySelector('[class^=slotHeader___] > [class^=successChance___]');
-                
+
                 if (!slotTitleElement || !slotSkillElement) return;
 
                 const slotTitle = slotTitleElement.textContent.trim();
                 const slotSkill = Number(slotSkillElement.textContent);
-                
+
                 if (role.className.indexOf('waitingJoin___') > -1) {
                     const roleRequirement = requirements[slotTitle];
-                    
+
                     if (roleRequirement !== undefined && slotSkill < roleRequirement) {
                         const roleJoinBtn = role.querySelector('[class^=slotBody___] > [class^=joinContainer___] > [class^=joinButtonContainer___] > [class*=joinButton___]');
-                        
+
                         if (roleJoinBtn && !roleJoinBtn.hasAttribute('data-oc-modified')) {
                             roleJoinBtn.setAttribute('disabled', true);
                             roleJoinBtn.textContent = `<${roleRequirement}`;
                             roleJoinBtn.style.color = 'crimson';
+                            roleJoinBtn.style.fontWeight = 'bold';
                             roleJoinBtn.setAttribute('data-oc-modified', 'true');
+
+                            // Add tooltip to show the requirement
+                            roleJoinBtn.title = `${slotTitle} requires ${roleRequirement}+ CPR (you have ${slotSkill})`;
                         }
                     }
                 }
@@ -180,10 +193,10 @@
     // Initialize the script
     async function initialize() {
         console.log('OC Requirements: Initializing...');
-        
+
         // Load requirements (from cache or fetch)
         crimeRequirements = await fetchRequirements();
-        
+
         // Set up observer for DOM changes
         const observerTarget = document.querySelector("#faction-crimes");
         if (!observerTarget) {
@@ -191,22 +204,22 @@
             return;
         }
 
-        const observerConfig = { 
-            attributes: false, 
-            childList: true, 
-            characterData: false, 
-            subtree: true 
+        const observerConfig = {
+            attributes: false,
+            childList: true,
+            characterData: false,
+            subtree: true
         };
 
         const observer = new MutationObserver(function(mutations) {
             let shouldApply = false;
-            
+
             mutations.forEach(mutation => {
                 if (String(mutation.target.className).indexOf('description___') > -1) {
                     shouldApply = true;
                 }
             });
-            
+
             if (shouldApply) {
                 // Small delay to ensure DOM is ready
                 setTimeout(applyCrimeRequirements, 100);
@@ -214,12 +227,12 @@
         });
 
         observer.observe(observerTarget, observerConfig);
-        
+
         // Apply requirements immediately if we're already on the crimes tab
         if (window.location.href.indexOf(CRIMES_TAB) > -1) {
             setTimeout(applyCrimeRequirements, 500);
         }
-        
+
         console.log('OC Requirements: Initialized successfully');
     }
 
