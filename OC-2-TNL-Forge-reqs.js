@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name         OC 2.0 TNL-Forge Role Requirements (Dynamic)
+// @name         OC 2.0 TNL-Forge Role Requirements
 // @namespace    MonChoon_
 // @version      2.0
-// @description  Torn OC 2.0 Requirements for Roles in Specific Crimes, based on TNL Forge - Dynamic version with Google Sheets backend
+// @description  Torn OC 2.0 Requirements for Roles in Specific Crimes, based on TNL Forge
 // @license      MIT
 // @author       MonChoon [2250591], Silmaril [2665762]
 // @match        https://www.torn.com/factions.php?step=your*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
-// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/oc-dynamic-requirements.user.js
-// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/oc-dynamic-requirements.user.js
+// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/OC-2-TNL-Forge-reqs.js
+// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/OC-2-TNL-Forge-reqs.js
 // ==/UserScript==
 
 (function() {
