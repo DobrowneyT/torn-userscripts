@@ -18,10 +18,10 @@
     // =============================================================================
 
     // Your Google Apps Script Web App URL (get this after deploying your script)
-    const APP_URL = 'https://script.google.com/macros/s/AKfycbyomClNFC_jF8AO-dMaTOvctTDda1gpDf0m1RF8j8vkVW1Tk2gJhjKE6KE6ueqDp8w1/exec';
+    const APP_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE';
 
     // Your QT_KEY from the Google Sheet (must match the one in QuickTrade.gs)
-    const QT_KEY = 'IHJLi5bsCVbFO0mR';
+    const QT_KEY = 'YOUR_QT_KEY_HERE';
 
     // Optional: Enable chat receipt functionality (not implemented yet)
     const CHAT_RECEIPT = false;
@@ -33,6 +33,9 @@
     // Validate configuration
     if (APP_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE' || !APP_URL) {
         console.error('QuickTrade: Please configure your Google Apps Script URL in the userscript');
+        return;
+    if (QT_KEY === 'YOUR_QT_KEY_HERE' || !QT_KEY) {
+        console.error('QuickTrade: Please configure your QT Key in the userscript');
         return;
     }
 
