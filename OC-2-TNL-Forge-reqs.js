@@ -11,7 +11,8 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @connect      docs.google.com
-// @connect      sheets.googleapis.com
+// @connect      googleusercontent.com
+// @connect      doc-*.sheets.googleusercontent.com
 // @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/OC-2-TNL-Forge-reqs.js
 // @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/OC-2-TNL-Forge-reqs.js
 // ==/UserScript==
