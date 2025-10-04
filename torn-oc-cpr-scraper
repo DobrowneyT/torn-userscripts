@@ -1,0 +1,131 @@
+// ==UserScript==
+// @name         Torn OC CPR Scraper Trigger
+// @namespace    MonChoon_
+// @version      1.0
+// @description  Add CPR scrape button to Torn OC page
+// @license      MIT
+// @author       MonChoon [2250591]
+// @match        https://www.torn.com/factions.php?step=your*
+// @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/torn-oc-cpr-scraper.js
+// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/torn-oc-cpr-scraper.js
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // Configuration - set these once
+    const GITHUB_USERNAME = 'GITHUB_USERNAME';
+    const GITHUB_REPO = 'REPO_NAME';
+    const GITHUB_TOKEN = GM_getValue('github_token', ''); // Stored in script
+    
+    // Add button to page
+    function addCPRButton() {
+        const container = document.querySelector('.content-title') || 
+                         document.querySelector('.title-black');
+        
+        if (!container || document.getElementById('cpr-scrape-btn')) return;
+        
+        const button = document.createElement('button');
+        button.id = 'cpr-scrape-btn';
+        button.textContent = '🎯 Scrape CPR';
+        button.style.cssText = `
+            margin-left: 15px;
+            padding: 5px 15px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        `;
+        
+        button.onclick = triggerCPRScrape;
+        container.appendChild(button);
+    }
+    
+    // Trigger GitHub workflow
+    function triggerCPRScrape() {
+        if (!GITHUB_TOKEN) {
+            alert('GitHub token not configured. Set it in Tampermonkey script.');
+            return;
+        }
+        
+        const button = document.getElementById('cpr-scrape-btn');
+        button.textContent = '⏳ Triggering...';
+        button.disabled = true;
+        
+        const url = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPO}/dispatches`;
+        
+        GM_xmlhttpRequest({
+            method: 'POST',
+            url: url,
+            headers: {
+                'Accept': 'application/vnd.github.v3+json',
+                'Authorization': `Bearer ${GITHUB_TOKEN}`,
+                'Content-Type': 'application/json',
+                'User-Agent': 'Tampermonkey-CPR-Trigger'
+            },
+            data: JSON.stringify({
+                event_type: 'trigger-cpr-scrape',
+                client_payload: {
+                    triggered_by: 'tampermonkey',
+                    timestamp: new Date().toISOString(),
+                    source: 'torn_oc_page'
+                }
+            }),
+            onload: function(response) {
+                if (response.status === 204) {
+                    button.textContent = '✅ Triggered!';
+                    button.style.background = '#28a745';
+                    setTimeout(() => {
+                        button.textContent = '🎯 Scrape CPR';
+                        button.disabled = false;
+                    }, 3000);
+                } else {
+                    button.textContent = '❌ Failed';
+                    button.style.background = '#dc3545';
+                    alert(`Error ${response.status}: ${response.responseText}`);
+                    setTimeout(() => {
+                        button.textContent = '🎯 Scrape CPR';
+                        button.disabled = false;
+                    }, 3000);
+                }
+            },
+            onerror: function(error) {
+                button.textContent = '❌ Network Error';
+                button.style.background = '#dc3545';
+                console.error('CPR Scrape trigger error:', error);
+                setTimeout(() => {
+                    button.textContent = '🎯 Scrape CPR';
+                    button.disabled = false;
+                }, 3000);
+            }
+        });
+    }
+    
+    // Setup token (run once)
+    function setupToken() {
+        if (!GITHUB_TOKEN) {
+            const token = prompt('Enter your GitHub Personal Access Token:');
+            if (token) {
+                GM_setValue('github_token', token);
+                alert('Token saved! Reload the page.');
+            }
+        }
+    }
+    
+    // Initialize
+    addCPRButton();
+    
+    // Re-add button if page updates (Torn uses AJAX)
+    const observer = new MutationObserver(() => addCPRButton());
+    observer.observe(document.body, { childList: true, subtree: true });
+    
+    // Add setup option to Tampermonkey menu
+    if (!GITHUB_TOKEN) {
+        console.log('Run setupToken() in console to configure GitHub token');
+    }
+})();
