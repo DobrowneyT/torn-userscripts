@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         OC 2.0 TNL-Forge Role Requirements
+// @name         [FORGE] OC 2.0 Role Requirements
 // @namespace    MonChoon_
 // @version      2.1
 // @description  Torn OC 2.0 Requirements for Roles in Specific Crimes, based on TNL Forge
