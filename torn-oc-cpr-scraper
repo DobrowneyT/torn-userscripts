@@ -5,7 +5,8 @@
 // @description  Add CPR scrape button to Torn OC page
 // @license      MIT
 // @author       MonChoon [2250591]
-// @match        https://www.torn.com/factions.php?step=your*
+// @match        https://www.torn.com/factions.php?step=your&type=1#/tab=crimes
+// @match        https://www.torn.com/factions.php?step=your&type=12#/tab=crimes
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
