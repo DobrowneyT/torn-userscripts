@@ -35,7 +35,7 @@
  *
  */
 
-const apikey = 'LIMITED_API_KEY'; // ← EDIT THIS LINE WITH YOUR API KEY
+const apikey = 'YOUR_LIMITED-ACCESS_API_KEY'; // ← EDIT THIS LINE WITH YOUR API KEY
 
 // Category-based selling multipliers (applied to market_price)
 const CATEGORY_MULTIPLIERS = {
