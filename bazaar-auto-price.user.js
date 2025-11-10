@@ -6,8 +6,8 @@
 // @license      MIT
 // @author       tos, Lugburz, MonChoon [2250591]
 // @match        *.torn.com/bazaar.php*
-// @downloadURL  https://github.com/MonChoon/torn-userscripts/raw/main/bazaar-auto-price-v2.user.js
-// @updateURL    https://github.com/MonChoon/torn-userscripts/raw/main/bazaar-auto-price-v2.user.js
+// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/bazaar-auto-price.user.js
+// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/bazaar-auto-price.user.js
 // @connect      api.torn.com
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
