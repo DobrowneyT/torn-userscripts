@@ -1,20 +1,20 @@
 // ==UserScript==
-// @name         Bazaar Auto Price
+// @name         Bazaar Auto Price (Category-Based)
 // @namespace    tos-MonChoon_
-// @version      0.8.1
-// @description  Auto set bazaar prices on money input field click using API v2. Modified by MonChoon to use item market API.
+// @version      0.9.0
+// @description  Auto set bazaar prices using market price with category multipliers. Modified by MonChoon.
 // @license      MIT
 // @author       tos, Lugburz, MonChoon [2250591]
 // @match        *.torn.com/bazaar.php*
-// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/bazaar-auto-price.user.js
-// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/bazaar-auto-price.user.js
+// @downloadURL  https://github.com/MonChoon/torn-userscripts/raw/main/bazaar-auto-price-v2.user.js
+// @updateURL    https://github.com/MonChoon/torn-userscripts/raw/main/bazaar-auto-price-v2.user.js
 // @connect      api.torn.com
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
 /*
  * Original script by tos, Lugburz
- * Modified by MonChoon [2250591] for compliance with Torn's API ToS Guidelines
+ * Modified by MonChoon [2250591] for category-based pricing
  *
  * =============================================================================
  * 🔑 API KEY CONFIGURATION - EDIT THE LINE BELOW WITH YOUR API KEY
@@ -26,38 +26,46 @@
  * Required Access Level: Limited Access
  *
  * =============================================================================
- * 📋 API TERMS OF SERVICE (ToS) - REQUIRED BY TORN
+ * 📋 CATEGORY MULTIPLIERS - EDIT THESE TO ADJUST YOUR PRICING STRATEGY
  * =============================================================================
  *
- * By using this script with your API key, you acknowledge:
+ * These multipliers are applied to the market price for each category.
+ * Values below 1.0 will price below market (more competitive).
+ * Adjust based on your desired profit margins and market competitiveness.
  *
- * ┌─────────────────────┬─────────────────────────────────────────────────────┐
- * │ Data Storage        │ Only locally (in this script file)                 │
- * ├─────────────────────┼─────────────────────────────────────────────────────┤
- * │ Data Sharing        │ Nobody                                              │
- * ├─────────────────────┼─────────────────────────────────────────────────────┤
- * │ Purpose of Use      │ Personal automation (bazaar pricing)               │
- * ├─────────────────────┼─────────────────────────────────────────────────────┤
- * │ Key Storage &       │ Not stored / Not shared (only in this script file) │
- * │ Sharing             │                                                     │
- * ├─────────────────────┼─────────────────────────────────────────────────────┤
- * │ Key Access Level    │ Limited Access (or higher)                          │
- * └─────────────────────┴─────────────────────────────────────────────────────┘
- *
- * This script:
- * - Does NOT store your API key anywhere except in this script file
- * - Does NOT share your API key with anyone
- * - Does NOT send your data to any external services
- * - Only uses your API key to fetch market prices from Torn's official API
- * - Complies with all Torn scripting rules and API usage policies
- *
- * You can monitor your API key usage at:
- * https://www.torn.com/preferences.php#tab=api (Key -> Log)
- *
- * =============================================================================
  */
 
-const apikey = 'YOUR_LIMITED-ACCESS_API_KEY'; // ← EDIT THIS LINE WITH YOUR API KEY
+const apikey = 'LGa2faZu3WxR9ioO'; // ← EDIT THIS LINE WITH YOUR API KEY
+
+// Category-based selling multipliers (applied to market_price)
+const CATEGORY_MULTIPLIERS = {
+    'Flower': 0.985,
+    'Plushie': 0.985,
+    'Energy Drink': 0.985,
+    'Booster': 0.98,
+    'Supply Pack': 0.97,
+    'Drug': 0.95,
+    'Alcohol': 0.97,
+    'Candy': 0.97,
+    'Medical': 0.96,
+    'Temporary': 0.95,
+    'Clothing': 0.93,
+    'Primary': 0.92,
+    'Secondary': 0.92,
+    'Melee': 0.92,
+    'Armour': 0.92,
+    'Enhancer': 0.98,
+    'Car': 0.92,
+    'Tool': 0.96,
+    'Material': 0.96,
+    'Jewelry': 0.96,
+    'Special': 0.97,
+    'Collectible': 0.94,
+    'Miscellaneous': 0.94,
+    'Artifact': 0.97,
+    // Default multiplier for unknown categories
+    'default': 0.95
+};
 
 // =============================================================================
 // DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING
@@ -69,11 +77,15 @@ if (apikey === 'YOUR_LIMITED-ACCESS_API_KEY' || !apikey || apikey.length !== 16)
     throw new Error('Invalid API key configuration');
 }
 
-const torn_api_v2 = async (itemID) => {
+// Cache for item data to reduce API calls
+const itemCache = new Map();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+const torn_api_v2_items = async (itemID) => {
     return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
             method: "GET",
-            url: `https://api.torn.com/v2/market/${itemID}/itemmarket?offset=0&key=${apikey}`,
+            url: `https://api.torn.com/v2/torn/${itemID}/items?key=${apikey}`,
             headers: {
                 "Content-Type": "application/json"
             },
@@ -84,7 +96,7 @@ const torn_api_v2 = async (itemID) => {
                     // Check for API errors
                     if (resjson.error) {
                         if (resjson.error.code === 2) {
-                            alert('❌ Invalid API Key\n\nPlease check your API key in the script and ensure it:\n- Is 16 characters long\n- Has Limited Access permissions\n- Is copied correctly from your Torn preferences');
+                            console.error('❌ Invalid API Key - Check your API key configuration');
                         } else if (resjson.error.code === 5) {
                             console.error('⚠️ API Rate Limit: Too many requests. Please wait before trying again.');
                         }
@@ -107,24 +119,52 @@ const torn_api_v2 = async (itemID) => {
 var event = new Event('keyup');
 var APIERROR = false;
 
-async function lmp(itemID) {
+async function calculatePrice(itemID) {
     if(APIERROR === true) return 'API key error';
 
+    // Check cache first
+    const cached = itemCache.get(itemID);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+        console.log(`Using cached price for item ${itemID}: ${cached.price}`);
+        return cached.price;
+    }
+
     try {
-        const response = await torn_api_v2(itemID);
+        const response = await torn_api_v2_items(itemID);
 
         if (response.error) {
             APIERROR = true;
             return 'API key error';
         }
 
-        // Check if we have itemmarket data with listings
-        if (response.itemmarket && response.itemmarket.listings && response.itemmarket.listings.length > 0) {
-            // Get the lowest price (first item in the sorted listings array)
-            const lowest_market_price = response.itemmarket.listings[0].price;
-            return lowest_market_price - 5;
+        // Check if we have item data
+        if (response.items && response.items.length > 0) {
+            const item = response.items[0];
+            const marketPrice = item.value?.market_price;
+            const category = item.type;
+
+            if (!marketPrice || marketPrice === 0) {
+                console.warn(`No market price available for item ${itemID} (${item.name})`);
+                return 'No market data';
+            }
+
+            // Get the multiplier for this category (default to 0.95 if category not found)
+            const multiplier = CATEGORY_MULTIPLIERS[category] || CATEGORY_MULTIPLIERS['default'];
+
+            // Calculate the selling price
+            const sellingPrice = Math.floor(marketPrice * multiplier);
+
+            console.log(`Item: ${item.name} | Category: ${category} | Market: $${marketPrice.toLocaleString()} | Multiplier: ${multiplier} | Selling: $${sellingPrice.toLocaleString()}`);
+
+            // Cache the result
+            itemCache.set(itemID, {
+                price: sellingPrice,
+                timestamp: Date.now()
+            });
+
+            return sellingPrice;
         } else {
-            return 'No market data available';
+            return 'No item data available';
         }
     } catch (error) {
         console.error('Bazaar Auto Price API Error:', error);
@@ -156,8 +196,7 @@ function addOneFocusHandler(elem, itemID) {
     $(elem).on('focus', function(e) {
         this.value = '';
         if (this.value === '') {
-            lmp(itemID).then((price) => {
-                //this.value = price;
+            calculatePrice(itemID).then((price) => {
                 reactInputHack(this, price);
                 this.dispatchEvent(event);
                 if(price && typeof price === 'number') $(elem).off('focus');
@@ -209,3 +248,9 @@ const wrapper = document.querySelector('#bazaarRoot');
 if (wrapper) {
     observer.observe(wrapper, { subtree: true, childList: true });
 }
+
+// Log configuration on load
+console.log('=== Bazaar Auto Price (Category-Based) Loaded ===');
+console.log('Category Multipliers:', CATEGORY_MULTIPLIERS);
+console.log('Cache Duration:', CACHE_DURATION / 1000, 'seconds');
+console.log('===============================================');
