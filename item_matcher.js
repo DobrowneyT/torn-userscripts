@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Item Matcher 131 aquagloop even better
-// @version      999.3
+// @version      999.4
 // @description  wooo
 // @author       aquagloop
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
@@ -273,6 +273,12 @@
     const SEND_QUEUE_INTERVAL = 5000;
     const HIGHLIGHT_DEBOUNCE_MS = 300;
     const GEAR_CACHE_EXPIRY_MS = 10 * 60 * 1000;
+    
+    // Price filter configuration
+    // Set to -1 for NO price filter
+    // Set to 0 for EXACT price match
+    // Set to positive number for percentage band (e.g., 10 = ±10% of listed price)
+    const PRICE_FILTER_PERCENTAGE = 10;
 
     let pda = ('xmlhttpRequest' in GM);
     let httpRequest = pda ? 'xmlHttpRequest' : 'xmlHttpRequest';
@@ -826,7 +832,7 @@
         updateStatsUI();
     }
 
-    // MODIFIED: Remove price filter from search URL
+    // MODIFIED: Add price filter with configurable tolerance percentage
     function generateItemSearchURL(item) {
         const itemID = ITEM_ID_MAP[item.item_name];
         if (!itemID) return null;
@@ -836,12 +842,29 @@
         const fromAccuracy = Math.floor(item.accuracy || 0);
         const toAccuracy = fromAccuracy + 1;
 
-        // Removed price filter completely
+        // Handle price filter based on PRICE_FILTER_PERCENTAGE setting
+        let priceParams = '';
+        const price = item.price ? parseInt(item.price, 10) : 0;
+        
+        if (PRICE_FILTER_PERCENTAGE !== -1 && price > 0) {
+            if (PRICE_FILTER_PERCENTAGE === 0) {
+                // Exact price match (original behavior)
+                priceParams = `&priceFrom=${price}&priceTo=${price}`;
+            } else {
+                // Percentage band (e.g., 10% = ±10%)
+                const priceVariation = Math.floor(price * (PRICE_FILTER_PERCENTAGE / 100));
+                const priceFrom = price - priceVariation;
+                const priceTo = price + priceVariation;
+                priceParams = `&priceFrom=${priceFrom}&priceTo=${priceTo}`;
+            }
+        }
+        // If PRICE_FILTER_PERCENTAGE is -1, priceParams remains empty (no price filter)
+
         let searchURL;
         if (ARMOR_NAMES.has(item.item_name)) {
-            searchURL = `https://www.torn.com/page.php?sid=ItemMarket#/market/view=search&itemID=${itemID}&sortField=price&sortOrder=DESC&armorFrom=${fromValue}&armorTo=${toValue}`;
+            searchURL = `https://www.torn.com/page.php?sid=ItemMarket#/market/view=search&itemID=${itemID}&sortField=price&sortOrder=DESC&armorFrom=${fromValue}&armorTo=${toValue}${priceParams}`;
         } else {
-            searchURL = `https://www.torn.com/page.php?sid=ItemMarket#/market/view=search&itemID=${itemID}&sortField=price&sortOrder=DESC&damageFrom=${fromValue}&damageTo=${toValue}&accuracyFrom=${fromAccuracy}&accuracyTo=${toAccuracy}`;
+            searchURL = `https://www.torn.com/page.php?sid=ItemMarket#/market/view=search&itemID=${itemID}&sortField=price&sortOrder=DESC&damageFrom=${fromValue}&damageTo=${toValue}&accuracyFrom=${fromAccuracy}&accuracyTo=${toAccuracy}${priceParams}`;
         }
         return searchURL;
     }
@@ -877,7 +900,7 @@
             });
         } else {
             sortedItems.sort((a, b) => {
-                return uncachedSortOrder === 'asc'
+                return uncachedSortOrder === 'asc' 
                     ? a.item_name.localeCompare(b.item_name)
                     : b.item_name.localeCompare(a.item_name);
             });
@@ -938,7 +961,7 @@
             // MODIFIED: Add arrow indicators for sort direction
             const priceArrow = uncachedSortBy === 'price' ? (uncachedSortOrder === 'asc' ? ' ▲' : ' ▼') : '';
             const nameArrow = uncachedSortBy === 'name' ? (uncachedSortOrder === 'asc' ? ' ▲' : ' ▼') : '';
-
+            
             const sortPriceColor = uncachedSortBy === 'price' ? '#66ff66' : '#888';
             const sortPriceWeight = uncachedSortBy === 'price' ? 'bold' : 'normal';
             const sortNameColor = uncachedSortBy === 'name' ? '#66ff66' : '#888';
@@ -952,7 +975,7 @@
                 });
             } else {
                 sortedItems.sort((a, b) => {
-                    return uncachedSortOrder === 'asc'
+                    return uncachedSortOrder === 'asc' 
                         ? a.item_name.localeCompare(b.item_name)
                         : b.item_name.localeCompare(a.item_name);
                 });
