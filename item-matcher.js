@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Item Matcher with Anonymous Cache
-// @version      1000.0
-// @description  Item matcher with separate anonymous cache support
-// @author       aquagloop
+// @name         Item Matcher 138 aquagloop anon-cache
+// @version      1000.1
+// @description  wooo - optimized version
+// @author       aquagloop, MonChoon
 // @match        https://www.torn.com/page.php?sid=ItemMarket*
 // @run-at       document-start
 // @icon         https://www.google.com/s2/favicons?sz=64&domain/torn.com
@@ -10,9 +10,9 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        GM.registerMenuCommand
-// @namespace    heartflower.torn
-// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/item-matcher.js
-// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/item-matcher.js
+// @namespace heartflower.torn
+// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/item-matcher.js
+// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/item-matcher.js
 // ==/UserScript==
 
 (function() {
@@ -268,14 +268,14 @@
     ]);
 
     // =============================================================================
-    // �MONCHOON'S ANON SERVER CONFIGURATION
+    // MONCHOON'S ANON SERVER CONFIGURATION
     // =============================================================================
 
     // Replace with YOUR Dynamic DNS hostname
     const ANON_SERVER_URL = 'http://24.76.194.65:3002';
 
     // =============================================================================
-    // Main server URLs (external - do not change)
+    // Main server URLs
     // =============================================================================
 
     const MAIN_SUBMIT_URL = 'http://136.117.216.24:3001/gear';
@@ -290,6 +290,7 @@
     const HIGHLIGHT_DEBOUNCE_MS = 300;
     const GEAR_CACHE_EXPIRY_MS = 10 * 60 * 1000;
     const PRICE_FILTER_PERCENTAGE = 10;
+    const POST_SEND_REFRESH_DELAY = 500;
 
     let pda = ('xmlhttpRequest' in GM);
     let httpRequest = pda ? 'xmlHttpRequest' : 'xmlHttpRequest';
@@ -321,6 +322,23 @@
     let anonGearCacheItems = [];
     let anonGearCacheLastFetch = null;
     let isFetchingAnonGearCache = false;
+    let isAnonServerAvailable = true;
+    let anonServerLastCheckTime = null;
+
+    // Track previous cache counts for change detection
+    let prevUncachedCount = 0;
+    let prevGearCacheCount = 0;
+    let prevAnonCacheCount = 0;
+
+    // Track previous highlight counts to avoid redundant logging
+    let prevGreenHighlights = 0;
+    let prevBlueHighlights = 0;
+
+    // Track processed listing IDs to avoid re-processing
+    let processedListingIDs = new Set();
+
+    // Debounced refresh after sending items
+    let postSendRefreshTimeout = null;
 
     let statsUI = null;
 
@@ -350,6 +368,11 @@
         anonGearCacheItems = await GM.getValue('anonGearCacheItems', []);
         const storedAnonGearFetchTime = await GM.getValue('anonGearCacheLastFetch', null);
         anonGearCacheLastFetch = storedAnonGearFetchTime ? new Date(storedAnonGearFetchTime) : null;
+
+        // Load anon server availability status
+        isAnonServerAvailable = await GM.getValue('isAnonServerAvailable', true);
+        const storedAnonServerCheckTime = await GM.getValue('anonServerLastCheckTime', null);
+        anonServerLastCheckTime = storedAnonServerCheckTime ? new Date(storedAnonServerCheckTime) : null;
 
         addDebugLog(`Script loaded. Enabled: ${isScriptEnabled}. Loaded ${uncachedItems.length} uncached + ${gearCacheItems.length} gear + ${anonGearCacheItems.length} anon items.`);
     }
@@ -463,17 +486,18 @@
         const now = Date.now();
 
         if (!forceRefresh && gearCacheItems.length > 0 && gearCacheLastFetch && (now - gearCacheLastFetch) < GEAR_CACHE_EXPIRY_MS) {
-            addDebugLog('Using cached gear cache (not expired)');
+            // Cache is still valid, use it silently
             return;
         }
 
         if (isFetchingGearCache) {
-            addDebugLog('Gear cache fetch already in progress...');
-            return;
+            return; // Silent skip if already fetching
         }
 
         isFetchingGearCache = true;
-        addDebugLog(forceRefresh ? 'Force refreshing gear cache...' : 'Fetching gear cache...');
+        if (forceRefresh) {
+            addDebugLog('Force refreshing gear cache...');
+        }
         updateStatsUI();
 
         GM[httpRequest]({
@@ -512,26 +536,32 @@
     }
 
     async function fetchAnonGearCache(forceRefresh = false) {
+        // Skip if we know server is unavailable (unless forcing refresh to retry)
+        if (!isAnonServerAvailable && !forceRefresh) {
+            return;
+        }
+
         const now = Date.now();
 
         if (!forceRefresh && anonGearCacheItems.length > 0 && anonGearCacheLastFetch && (now - anonGearCacheLastFetch) < GEAR_CACHE_EXPIRY_MS) {
-            addDebugLog('Using cached anon gear cache (not expired)');
             return;
         }
 
         if (isFetchingAnonGearCache) {
-            addDebugLog('Anon gear cache fetch already in progress...');
             return;
         }
 
         isFetchingAnonGearCache = true;
-        addDebugLog(forceRefresh ? 'Force refreshing anon gear cache...' : 'Fetching anon gear cache...');
+        if (forceRefresh) {
+            addDebugLog('Force refreshing anon gear cache...');
+        }
         updateStatsUI();
 
         GM[httpRequest]({
             method: 'GET',
             url: ANON_GEAR_CACHE_URL,
             responseType: 'json',
+            timeout: 5000,
             onload: async function(response) {
                 isFetchingAnonGearCache = false;
                 if (response.status === 200) {
@@ -539,6 +569,15 @@
                         const data = response.response || JSON.parse(response.responseText);
                         anonGearCacheItems = data.listings || [];
                         anonGearCacheLastFetch = new Date();
+
+                        if (!isAnonServerAvailable) {
+                            addDebugLog('✓ Anon server is back online!');
+                            isAnonServerAvailable = true;
+                            anonServerLastCheckTime = new Date();
+                            await GM.setValue('isAnonServerAvailable', true);
+                            await GM.setValue('anonServerLastCheckTime', anonServerLastCheckTime.toISOString());
+                        }
+
                         addDebugLog(`✓ Fetched ${anonGearCacheItems.length} anon gear cache items`);
 
                         await GM.setValue('anonGearCacheItems', anonGearCacheItems);
@@ -551,48 +590,115 @@
                         updateStatsUI();
                     }
                 } else {
-                    addDebugLog(`✗ Anon gear cache fetch failed (HTTP ${response.status})`);
+                    addDebugLog(`✗ Anon gear cache fetch failed (HTTP ${response.status}) - marking server as unavailable`);
+                    isAnonServerAvailable = false;
+                    anonServerLastCheckTime = new Date();
+                    await GM.setValue('isAnonServerAvailable', false);
+                    await GM.setValue('anonServerLastCheckTime', anonServerLastCheckTime.toISOString());
                     updateStatsUI();
                 }
             },
-            onerror: function() {
+            onerror: async function() {
                 isFetchingAnonGearCache = false;
-                addDebugLog(`✗ Network error fetching anon gear cache (is local server running?)`);
+
+                if (isAnonServerAvailable) {
+                    addDebugLog(`⚠️ Anon server unreachable - anonymous items will be ignored until server is back online`);
+                }
+
+                isAnonServerAvailable = false;
+                anonServerLastCheckTime = new Date();
+                await GM.setValue('isAnonServerAvailable', false);
+                await GM.setValue('anonServerLastCheckTime', anonServerLastCheckTime.toISOString());
+
+                updateStatsUI();
+            },
+            ontimeout: async function() {
+                isFetchingAnonGearCache = false;
+
+                addDebugLog(`⚠️ Anon server timeout - marking as unavailable`);
+                isAnonServerAvailable = false;
+                anonServerLastCheckTime = new Date();
+                await GM.setValue('isAnonServerAvailable', false);
+                await GM.setValue('anonServerLastCheckTime', anonServerLastCheckTime.toISOString());
+
                 updateStatsUI();
             }
         });
+    }
+
+    // Schedule a post-send refresh with debouncing
+    function schedulePostSendRefresh() {
+        if (postSendRefreshTimeout) {
+            clearTimeout(postSendRefreshTimeout);
+        }
+
+        postSendRefreshTimeout = setTimeout(async () => {
+            addDebugLog('Post-send refresh: updating caches and re-highlighting');
+
+            // Force refresh both caches
+            await fetchGearCache(true);
+            if (isAnonServerAvailable) {
+                await fetchAnonGearCache(true);
+            }
+
+            // Clear all existing borders to force re-evaluation
+            const itemTiles = document.querySelectorAll('.itemTile___cbw7w');
+            itemTiles.forEach(tile => {
+                tile.style.border = '';
+                tile.style.boxShadow = '';
+            });
+
+            // Clear processed IDs to ensure all tiles are re-evaluated
+            processedListingIDs.clear();
+
+            // Re-highlight all items with fresh cache data
+            highlightMatchingItems();
+        }, POST_SEND_REFRESH_DELAY);
     }
 
     async function highlightMatchingItems() {
         if (!isScriptEnabled) return;
 
         await fetchGearCache();
-        await fetchAnonGearCache();
 
-        addDebugLog(`Cache status - Uncached: ${uncachedItems.length}, Gear: ${gearCacheItems.length}, Anon: ${anonGearCacheItems.length}`);
+        if (isAnonServerAvailable) {
+            await fetchAnonGearCache();
+        }
 
-        // Log a sample of anon cache items for debugging
-        if (anonGearCacheItems.length > 0 && anonGearCacheItems.length <= 5) {
-            anonGearCacheItems.forEach(item => {
-                const itemName = item.itemName || item.item_name;
-                const damage = item.stats?.damage || item.damage_armor;
-                const accuracy = item.stats?.accuracy || item.accuracy;
-                addDebugLog(`  Anon cached: ${itemName} (${damage}/${accuracy})`);
-            });
+        // Only log cache status if counts have changed
+        const currentUncachedCount = uncachedItems.length;
+        const currentGearCacheCount = gearCacheItems.length;
+        const currentAnonCacheCount = isAnonServerAvailable ? anonGearCacheItems.length : 'OFFLINE';
+
+        if (currentUncachedCount !== prevUncachedCount ||
+            currentGearCacheCount !== prevGearCacheCount ||
+            currentAnonCacheCount !== prevAnonCacheCount) {
+
+            addDebugLog(`Cache status - Uncached: ${currentUncachedCount}, Gear: ${currentGearCacheCount}, Anon: ${currentAnonCacheCount}`);
+
+            prevUncachedCount = currentUncachedCount;
+            prevGearCacheCount = currentGearCacheCount;
+            prevAnonCacheCount = currentAnonCacheCount;
         }
 
         const itemTiles = document.querySelectorAll('.itemTile___cbw7w');
         let greenHighlights = 0;
         let blueHighlights = 0;
+        let newlyProcessed = 0;
 
         itemTiles.forEach(tile => {
-            tile.style.border = '';
-            tile.style.boxShadow = '';
-            const existingBadge = tile.querySelector('.uncached-price-badge');
-            if (existingBadge) {
-                existingBadge.remove();
+            // Check if tile already has highlighting
+            const hasGreenBorder = tile.style.border.includes('00ff00');
+            const hasBlueBorder = tile.style.border.includes('0088ff');
+
+            // If already highlighted, just count it and skip processing
+            if (hasGreenBorder || hasBlueBorder) {
+                if (hasGreenBorder) greenHighlights++;
+                if (hasBlueBorder) blueHighlights++;
+                return;
             }
 
+            // Not highlighted yet, extract data and process
             const nameEl = tile.querySelector('.name___ukdHN');
             if (!nameEl) return;
 
@@ -612,61 +718,90 @@
                 accuracy = 0;
             }
 
-            const uncachedMatch = uncachedItems.find(item => {
-                // Handle both item_name and itemName formats
-                const uncachedItemName = item.item_name || item.itemName;
-                if (uncachedItemName !== itemName) return false;
-                const itemDamageArmor = parseFloat(item.damage_armor);
-                const itemAccuracy = parseFloat(item.accuracy || 0);
-                return itemDamageArmor === damageArmor && itemAccuracy === accuracy;
-            });
+            // Create a unique ID for tracking
+            const pseudoID = `${itemName}_${damageArmor}_${accuracy}`;
 
-            if (uncachedMatch) {
-                greenHighlights++;
-                tile.style.border = '2px solid #00ff00';
-                tile.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)';
-                return;
+            // Mark this tile with its ID
+            tile.setAttribute('data-listing-id', pseudoID);
+
+            // Track if this is newly processed
+            if (!processedListingIDs.has(pseudoID)) {
+                processedListingIDs.add(pseudoID);
+                newlyProcessed++;
             }
 
-            // Check both main gear cache AND anon gear cache
-            const gearCacheMatch = gearCacheItems.find(item => {
-                // Handle both itemName (camelCase) and item_name (underscore) formats
-                const cachedItemName = item.itemName || item.item_name;
-                if (cachedItemName !== itemName) return false;
+            // Process the tile
+            processTile(tile, itemName, damageArmor, accuracy);
 
-                // Handle both stats.damage and damage_armor formats
-                const itemDamageArmor = parseFloat(item.stats?.damage || item.damage_armor || 0);
-                const itemAccuracy = parseFloat(item.stats?.accuracy || item.accuracy || 0);
-                return itemDamageArmor === damageArmor && itemAccuracy === accuracy;
-            });
-
-            const anonGearCacheMatch = anonGearCacheItems.find(item => {
-                // Handle both itemName (camelCase) and item_name (underscore) formats
-                const cachedItemName = item.itemName || item.item_name;
-                if (cachedItemName !== itemName) return false;
-
-                // Handle both stats.damage and damage_armor formats
-                const itemDamageArmor = parseFloat(item.stats?.damage || item.damage_armor || 0);
-                const itemAccuracy = parseFloat(item.stats?.accuracy || item.accuracy || 0);
-                const matches = itemDamageArmor === damageArmor && itemAccuracy === accuracy;
-
-//                 if (matches) {
-//                     addDebugLog(`✓ Anon cache match: ${itemName} (${damageArmor}/${accuracy})`);
-//                 }
-
-                return matches;
-            });
-
-            // Only highlight blue if item is NOT in either cache
-            if (!gearCacheMatch && !anonGearCacheMatch) {
-                blueHighlights++;
-                tile.style.border = '2px solid #0088ff';
-                tile.style.boxShadow = '0 0 10px rgba(0, 136, 255, 0.5)';
-            }
+            // Count the new highlights
+            if (tile.style.border.includes('00ff00')) greenHighlights++;
+            if (tile.style.border.includes('0088ff')) blueHighlights++;
         });
 
-        if (greenHighlights > 0 || blueHighlights > 0) {
-            addDebugLog(`Highlighted ${greenHighlights} uncached (green) + ${blueHighlights} new gear (blue) items`);
+        // Only log if highlight counts changed OR if we processed new items
+        if (greenHighlights !== prevGreenHighlights ||
+            blueHighlights !== prevBlueHighlights ||
+            newlyProcessed > 0) {
+
+            addDebugLog(`Highlighted ${greenHighlights} uncached (green) + ${blueHighlights} new gear (blue) items${newlyProcessed > 0 ? ` (${newlyProcessed} newly processed)` : ''}`);
+
+            prevGreenHighlights = greenHighlights;
+            prevBlueHighlights = blueHighlights;
+        }
+    }
+
+    // Extracted tile processing logic for reusability
+    function processTile(tile, itemName, damageArmor, accuracy) {
+        // Reset styling
+        tile.style.border = '';
+        tile.style.boxShadow = '';
+        const existingBadge = tile.querySelector('.uncached-price-badge');
+        if (existingBadge) {
+            existingBadge.remove();
+        }
+
+        // Check uncached match
+        const uncachedMatch = uncachedItems.find(item => {
+            const uncachedItemName = item.item_name || item.itemName;
+            if (uncachedItemName !== itemName) return false;
+            const itemDamageArmor = parseFloat(item.damage_armor);
+            const itemAccuracy = parseFloat(item.accuracy || 0);
+            return itemDamageArmor === damageArmor && itemAccuracy === accuracy;
+        });
+
+        if (uncachedMatch) {
+            tile.style.border = '2px solid #00ff00';
+            tile.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.5)';
+            return;
+        }
+
+        // Check gear cache
+        const gearCacheMatch = gearCacheItems.find(item => {
+            const cachedItemName = item.itemName || item.item_name;
+            if (cachedItemName !== itemName) return false;
+
+            const itemDamageArmor = parseFloat(item.stats?.damage || item.damage_armor || 0);
+            const itemAccuracy = parseFloat(item.stats?.accuracy || item.accuracy || 0);
+            return itemDamageArmor === damageArmor && itemAccuracy === accuracy;
+        });
+
+        // Check anon cache if server is available
+        let anonGearCacheMatch = null;
+        if (isAnonServerAvailable) {
+            anonGearCacheMatch = anonGearCacheItems.find(item => {
+                const cachedItemName = item.itemName || item.item_name;
+                if (cachedItemName !== itemName) return false;
+
+                const itemDamageArmor = parseFloat(item.stats?.damage || item.damage_armor || 0);
+                const itemAccuracy = parseFloat(item.stats?.accuracy || item.accuracy || 0);
+                return itemDamageArmor === damageArmor && itemAccuracy === accuracy;
+            });
+        }
+
+        // Highlight blue if NOT in either cache
+        if (!gearCacheMatch && !anonGearCacheMatch) {
+            tile.style.border = '2px solid #0088ff';
+            tile.style.boxShadow = '0 0 10px rgba(0, 136, 255, 0.5)';
         }
     }
 
@@ -692,7 +827,6 @@
                     const armouryID = params.get('armouryID');
                     if (armouryID) {
                         currentArmouryID = armouryID;
-                        addDebugLog(`Captured armouryID: ${armouryID}`);
                     }
                 } catch (err) {
                     addDebugLog(`Error parsing request body: ${err.message}`);
@@ -724,18 +858,19 @@
     function tryAutoSendListing(listing, retries = 20) {
         if (!isScriptEnabled) return;
 
-        // Check if anonymous
         const isAnonymous = listing.anonymous === true ||
                            (listing.user && listing.user.ID === "0") ||
                            (listing.user && listing.user.ID === 0);
 
+        if (isAnonymous && !isAnonServerAvailable) {
+            return;
+        }
+
         if (isAnonymous) {
-            // Check anon cache
             if (anonCacheIDs.has(listing.listingID)) {
                 return;
             }
         } else {
-            // Check main gear cache
             if (gearCacheIDs.has(listing.listingID)) {
                 return;
             }
@@ -765,15 +900,29 @@
             };
 
             if (isAnonymous) {
-                // Add to anonymous queue and send IMMEDIATELY (no delay)
+                const isOnUncachedList = uncachedItems.some(item => {
+                    const nameMatch = (item.item_name || item.itemName) === listingData.item_name;
+                    if (!nameMatch) return false;
+
+                    const itemDamageArmor = parseFloat(item.damage_armor || item.stats?.damage || 0);
+                    const itemAccuracy = parseFloat(item.accuracy || item.stats?.accuracy || 0);
+                    const listingDamageArmor = parseFloat(listingData.damage_armor);
+                    const listingAccuracy = parseFloat(listingData.accuracy || 0);
+
+                    return itemDamageArmor === listingDamageArmor && itemAccuracy === listingAccuracy;
+                });
+
                 anonCacheIDs.add(listing.listingID);
                 anonListingQueue.push(listingData);
                 addDebugLog(`Queued ANON: ${listingData.item_name} ($${listingData.price})`);
-
-                // Send immediately - no delay for anon items
                 processAnonQueue();
+
+                if (isOnUncachedList) {
+                    gearCacheIDs.add(listing.listingID);
+                    listingQueue.push(listingData);
+                    addDebugLog(`Also queued for MAIN (uncached): ${listingData.item_name}`);
+                }
             } else {
-                // Add to main queue (5 second delay preserved for main server)
                 gearCacheIDs.add(listing.listingID);
                 listingQueue.push(listingData);
                 addDebugLog(`Queued: ${listingData.item_name} ($${listingData.price})`);
@@ -801,7 +950,6 @@
             if (valueElement) {
                 damageArmor = valueElement.textContent.trim();
             } else {
-                addDebugLog(`No damage/armor found for: ${itemName}. Skipping.`);
                 return null;
             }
 
@@ -830,12 +978,6 @@
                     }
                 }
             });
-
-            if (bonuses.length > 0) {
-                addDebugLog(`Bonuses scraped for ${itemName}: ${bonuses.map(b => `${b.name} (${b.value}${b.isPercentage ? '%' : ' turns'})`).join(', ')}`);
-            } else {
-                addDebugLog(`No bonuses found for ${itemName}`);
-            }
 
             return { item_name: itemName, damage_armor: damageArmor, accuracy: accuracy, bonuses: bonuses };
         } catch (err) {
@@ -871,7 +1013,6 @@
                         uncachedItems.splice(itemIndex, 1);
                         addDebugLog(`Removed ${sentName} from uncached list.`);
                         GM.setValue('uncachedItems', uncachedItems);
-                        highlightMatchingItems();
                     }
 
                     const newCacheItem = {
@@ -894,6 +1035,9 @@
                     GM.setValue('gearCacheItems', gearCacheItems);
 
                     updateStatsUI();
+
+                    // Schedule post-send refresh
+                    schedulePostSendRefresh();
                 } else {
                     addDebugLog(`✗ Failed to send (HTTP ${response.status}): ${listingData.item_name}`);
                 }
@@ -905,7 +1049,6 @@
     }
 
     function sendAnonListingData(listingData) {
-        // Transform data to match main gear cache format
         const normalizedData = {
             listingID: listingData.listingID,
             itemId: null,
@@ -933,11 +1076,13 @@
                     anonItemsSentCount++;
                     addDebugLog(`✓ Sent ANON: ${normalizedData.itemName} ($${normalizedData.price})`);
 
-                    // Add to local cache immediately with correct format
                     anonGearCacheItems.push(normalizedData);
                     GM.setValue('anonGearCacheItems', anonGearCacheItems);
 
                     updateStatsUI();
+
+                    // Schedule post-send refresh (anon server is instant)
+                    schedulePostSendRefresh();
                 } else {
                     addDebugLog(`✗ Failed to send ANON (HTTP ${response.status}): ${normalizedData.itemName}`);
                 }
@@ -949,7 +1094,6 @@
     }
 
     function processListingQueue() {
-        // Process main queue (5 second delay preserved for main server stability)
         if (listingQueue.length > 0 && isScriptEnabled) {
             const itemToSend = listingQueue.shift();
             sendCompleteListingData(itemToSend);
@@ -958,7 +1102,6 @@
     }
 
     function processAnonQueue() {
-        // Process anon queue immediately - no delay needed for local server
         while (anonListingQueue.length > 0 && isScriptEnabled) {
             const itemToSend = anonListingQueue.shift();
             sendAnonListingData(itemToSend);
@@ -992,7 +1135,14 @@
         let currentX, currentY, initialX, initialY;
 
         statsUI.addEventListener('mousedown', (e) => {
-            if (e.target.tagName === 'BUTTON' || e.target.id.includes('-toggle') || e.target.id.includes('-sort-') || e.target.tagName === 'A') return;
+            // Don't drag if clicking on buttons, toggles, sort buttons, links, or debug log content
+            if (e.target.tagName === 'BUTTON' ||
+                e.target.id.includes('-toggle') ||
+                e.target.id.includes('-sort-') ||
+                e.target.tagName === 'A' ||
+                e.target.closest('#debug-log-content')) {
+                return;
+            }
             isDragging = true;
             initialX = e.clientX - statsUI.offsetLeft;
             initialY = e.clientY - statsUI.offsetTop;
@@ -1122,7 +1272,7 @@
             } else {
                 debugLogsHTML = `<div style="font-size: 10px; color: #666;">No activity logged yet.</div>`;
             }
-            debugLogsHTML = `<div style="max-height: 150px; overflow-y: auto; padding-right: 5px;">${debugLogsHTML}</div>`;
+            debugLogsHTML = `<div id="debug-log-content" style="max-height: 150px; overflow-y: auto; padding-right: 5px; user-select: text; cursor: text;">${debugLogsHTML}</div>`;
         }
 
         debugSection = `
@@ -1261,9 +1411,9 @@
                     ${gearCacheLastFetch ? `Last: ${gearCacheLastFetch.toLocaleTimeString()}` : 'Never fetched'}
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <div>👻 Anon Cache: <span style="color: #ff66ff; font-weight: bold;">${anonGearCacheItems.length}</span></div>
+                    <div>👻 Anon Cache: <span style="color: ${isAnonServerAvailable ? '#ff66ff' : '#ff4444'}; font-weight: bold;">${isAnonServerAvailable ? anonGearCacheItems.length : 'OFFLINE'}</span></div>
                     <button id="im-refresh-anon-btn" style="
-                        background: ${isFetchingAnonGearCache ? '#888' : '#ff66ff'};
+                        background: ${isFetchingAnonGearCache ? '#888' : (isAnonServerAvailable ? '#ff66ff' : '#ff4444')};
                         color: #fff;
                         border: none;
                         padding: 2px 6px;
@@ -1271,10 +1421,13 @@
                         cursor: ${isFetchingAnonGearCache ? 'not-allowed' : 'pointer'};
                         font-size: 9px;
                         font-weight: bold;
-                    " ${isFetchingAnonGearCache ? 'disabled' : ''}>${isFetchingAnonGearCache ? '...' : '🔄'}</button>
+                    " ${isFetchingAnonGearCache ? 'disabled' : ''}>${isFetchingAnonGearCache ? '...' : (isAnonServerAvailable ? '🔄' : '⚠️ Retry')}</button>
                 </div>
-                <div style="color: #666; font-size: 9px; margin-top: 2px;">
-                    ${anonGearCacheLastFetch ? `Last: ${anonGearCacheLastFetch.toLocaleTimeString()}` : 'Never fetched'}
+                <div style="color: ${isAnonServerAvailable ? '#666' : '#ff4444'}; font-size: 9px; margin-top: 2px;">
+                    ${isAnonServerAvailable
+                        ? (anonGearCacheLastFetch ? `Last: ${anonGearCacheLastFetch.toLocaleTimeString()}` : 'Never fetched')
+                        : `Server unavailable${anonServerLastCheckTime ? ` since ${anonServerLastCheckTime.toLocaleTimeString()}` : ''} - anon items ignored`
+                    }
                 </div>
             </div>
 
@@ -1343,9 +1496,13 @@
             let marketObserver;
 
             const debouncedHighlightAndUrlCheck = debounce(() => {
-                if (window.location.href !== currentUrl) {
-                    currentUrl = window.location.href;
-                    addDebugLog('Page navigation detected');
+                const newUrl = window.location.href;
+
+                // Clear processed IDs on URL change (new page/category)
+                if (newUrl !== currentUrl) {
+                    currentUrl = newUrl;
+                    processedListingIDs.clear();
+                    addDebugLog('Page navigation detected - cleared processed items');
                 }
 
                 if (!isOnItemMarketPage() || !isScriptEnabled) {
