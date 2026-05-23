@@ -13,8 +13,8 @@
 // @connect      docs.google.com
 // @connect      googleusercontent.com
 // @connect      doc-*.sheets.googleusercontent.com
-// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/OC-2-TNL-Forge-reqs.js
-// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/OC-2-TNL-Forge-reqs.js
+// @downloadURL  https://greasyfork.org/en/scripts/549404-forge-oc-2-0-role-requirements
+// @updateURL    https://greasyfork.org/en/scripts/549404-forge-oc-2-0-role-requirements
 // ==/UserScript==
 
 (function() {
