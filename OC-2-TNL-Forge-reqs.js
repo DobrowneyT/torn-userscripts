@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         [FORGE] OC 2.0 Role Requirements
 // @namespace    MonChoon_
-// @version      4.5
+// @version      4.6
 // @description  Torn OC 2.0 Requirements with visual indicators - reads CPR requirements from a published Google Sheet
 // @license      MIT
 // @author       MonChoon [2250591], xentac[3354782], underko[3362751]
@@ -158,13 +158,21 @@
             if (!slotHeader) return;
 
             const deficit = requirement - chance;
+            let neonColor;
             if (deficit <= 0) {
                 slotHeader.style.backgroundColor = '#239b56';
+                neonColor = '#00ff41';
             } else if (deficit <= YELLOW_THRESHOLD) {
                 slotHeader.style.backgroundColor = '#b7950b';
+                neonColor = '#ffea00';
             } else {
                 slotHeader.style.backgroundColor = '#a93226';
+                neonColor = '#f1948a';
             }
+
+            // Role name stays white, only the CPR fraction gets the neon colour
+            slotHeader.querySelectorAll('*').forEach(el => el.style.color = '#ffffff');
+            if (successEl) successEl.style.color = neonColor;
         });
 
         // Only mark as processed if we actually found roles
