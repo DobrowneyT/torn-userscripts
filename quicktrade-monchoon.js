@@ -1,41 +1,64 @@
 // ==UserScript==
-// @name         QuickTrade v2.0 - MonChoon Edition
+// @name         QuickTrade v2.3 - MonChoon Edition
 // @namespace    https://www.torn.com/
-// @version      2.0.0
+// @version      2.3.0
 // @description  Calculates total trade value based on up-to-date prices from Google Sheets pricelist
 // @author       MonChoon [2250591] - Based on original by Betrayer [1870130]
 // @match        https://www.torn.com/trade.php*
 // @grant        GM.xmlHttpRequest
+// @grant        GM.getValue
+// @grant        GM.setValue
+// @grant        GM.registerMenuCommand
 // @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/quicktrade-monchoon.js
 // @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/quicktrade-monchoon.js
 // ==/UserScript==
 
-(function() {
+(async function() {
     'use strict';
 
     // =============================================================================
-    // 🔑 CONFIGURATION - EDIT THESE VALUES
+    // 🔑 CONFIGURATION - set from the Tampermonkey extension menu:
+    // click the Tampermonkey icon > "QuickTrade v2.3 - MonChoon Edition" >
+    // "Set/Update App URL" / "Set/Update QT Key". No file editing required.
     // =============================================================================
 
-    // Your Google Apps Script Web App URL (get this after deploying your script)
-    const APP_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE';
-
-    // Your QT_KEY from the Google Sheet (must match the one in QuickTrade.gs)
-    const QT_KEY = 'YOUR_QT_KEY_HERE';
+    let APP_URL = await GM.getValue('qt_app_url', '');
+    let QT_KEY = await GM.getValue('qt_key', '');
 
     // Optional: Enable chat receipt functionality (not implemented yet)
     const CHAT_RECEIPT = false;
 
-    // =============================================================================
-    // CONFIGURATION END - DO NOT EDIT BELOW UNLESS YOU KNOW WHAT YOU'RE DOING
-    // =============================================================================
+    async function setAppUrl() {
+        const newUrl = prompt('QuickTrade: Enter your Google Apps Script Web App URL', APP_URL);
+        if (newUrl === null) return;
+        APP_URL = newUrl.trim();
+        await GM.setValue('qt_app_url', APP_URL);
+        alert('QuickTrade: App URL saved. Reload the trade page for it to take effect.');
+    }
+
+    async function setQtKey() {
+        const newKey = prompt('QuickTrade: Enter your QT Key', QT_KEY);
+        if (newKey === null) return;
+        QT_KEY = newKey.trim();
+        await GM.setValue('qt_key', QT_KEY);
+        alert('QuickTrade: QT Key saved. Reload the trade page for it to take effect.');
+    }
+
+    function viewConfig() {
+        alert(`QuickTrade Config:\nApp URL: ${APP_URL || '(not set)'}\nQT Key: ${QT_KEY || '(not set)'}`);
+    }
+
+    GM.registerMenuCommand('🔗 Set/Update App URL', setAppUrl);
+    GM.registerMenuCommand('🔑 Set/Update QT Key', setQtKey);
+    GM.registerMenuCommand('👁️ View Current Config', viewConfig);
 
     // Validate configuration
-    if (APP_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE' || !APP_URL) {
-        console.error('QuickTrade: Please configure your Google Apps Script URL in the userscript');
+    if (!APP_URL) {
+        console.error('QuickTrade: App URL not set. Use the Tampermonkey menu to configure it.');
         return;
-    if (QT_KEY === 'YOUR_QT_KEY_HERE' || !QT_KEY) {
-        console.error('QuickTrade: Please configure your QT Key in the userscript');
+    }
+    if (!QT_KEY) {
+        console.error('QuickTrade: QT Key not set. Use the Tampermonkey menu to configure it.');
         return;
     }
 
@@ -58,6 +81,7 @@
             GM.xmlHttpRequest({
                 method: 'GET',
                 url: APP_URL + '?key=' + QT_KEY,
+                anonymous: true, // avoid sending Google session cookies, which can cause script.google.com to redirect to a Drive "Page Not Found" page instead of running the script
                 onload: (response) => {
                     try {
                         const data = JSON.parse(response.response);
@@ -348,7 +372,7 @@
 
     // Initialize the script
     function initialize() {
-        console.log('QuickTrade v2.0: Initializing...');
+        console.log('QuickTrade v2.3: Initializing...');
 
         // Process items immediately if we're on a trade page
         if (window.location.href.includes('trade.php')) {
@@ -406,7 +430,7 @@
             subtree: true
         });
 
-        console.log('QuickTrade v2.0: Initialized successfully');
+        console.log('QuickTrade v2.3: Initialized successfully');
     }
 
     // Start the script when page is ready
