@@ -9,8 +9,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        GM.registerMenuCommand
-// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/quicktrade-monchoon.js
-// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/quicktrade-monchoon.js
+// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/quicktrade-monchoon.user.js
+// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/quicktrade-monchoon.user.js
 // ==/UserScript==
 
 (async function() {

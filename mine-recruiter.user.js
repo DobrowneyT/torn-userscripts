@@ -11,8 +11,8 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        unsafeWindow
-// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.js
-// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.js
+// @downloadURL https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.user.js
+// @updateURL https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.user.js
 // ==/UserScript==
 
 (function () {
