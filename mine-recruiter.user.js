@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mine Recruiter
 // @namespace    MonChoon_
-// @version      3.8.0
+// @version      3.9.0
 // @description  Adds recruit buttons to the User Search page. Opens chat and pre-fills recruitment message. Uses Torn HOF API for working stats enrichment with multi-key rotation.
 // @license      MIT
 // @author       MonChoon [2250591]
@@ -16,6 +16,14 @@
 // ==/UserScript==
 
 // CHANGELOG
+// 3.9.0 - Use Torn's OWN loader element as the "conversation loaded" signal
+//         instead of inferring it. A captured open shows the panel mounting at
+//         t=0 already carrying <div class="... loader___ydkxj"> and that
+//         element being REMOVED at +454ms once the fetch completes. Waiting for
+//         it to disappear is a statement from Torn rather than a guess, and it
+//         scales to a long history without tuning. The quiet-period check is
+//         kept underneath it, both to catch the final render and to keep
+//         working if a future Torn build drops the loader.
 // 3.8.0 - Step 2 now waits for the conversation to finish LOADING before the
 //         button offers to paste. Torn fetches the whole chat history when a
 //         panel opens and re-renders its virtualised list as it arrives; text
@@ -78,7 +86,10 @@
     const MINI_RENDER_TIMEOUT = 10000;
     // How long the chat panel must stop mutating before we treat the
     // conversation as loaded, and the cap on waiting for that.
-    const CHAT_QUIET_MS      = 400;
+    // Torn's loader was measured at ~450ms for an EMPTY conversation, so the
+    // cap has to leave room for a long history on a slow connection.
+    const CHAT_LOAD_TIMEOUT  = 8000;
+    const CHAT_QUIET_MS      = 300;
     const CHAT_QUIET_TIMEOUT = 5000;
 
     // =========================================================================
@@ -469,9 +480,44 @@
         });
     }
 
-    /** Mounted AND settled. Returns the panel so callers can chain. */
+    /**
+     * Torn's own "fetching the conversation" spinner, if it is still up.
+     *
+     * Captured from a real open (see CHANGELOG 3.9.0): the panel mounts at t=0
+     * already carrying
+     *
+     *     <div class="root___lC8Pu loader___ydkxj" style="--dot-count: 8;">
+     *
+     * and that element is REMOVED once the history has arrived — at +454ms for
+     * an empty conversation, later for one with messages. It is an explicit
+     * statement from Torn that the fetch is done, which beats any amount of
+     * inferring from node counts or heights.
+     *
+     * Matched on the `loader___` prefix, not the full hash: `___ydkxj` rotates
+     * on every Torn deploy, exactly like every other class in this panel.
+     */
+    function chatLoader(panel) {
+        return panel ? panel.querySelector('[class*="loader___"]') : null;
+    }
+
+    /** Mounted, fetched, and settled. Returns the panel so callers can chain. */
     async function waitForChatReady(panel, userId) {
         await waitFor(function () { return chatPanelParts(panel); }, WAIT_TIMEOUT);
+
+        // The real signal, when Torn gives us one.
+        if (chatLoader(panel)) {
+            try {
+                await waitFor(function () { return !chatLoader(panel); }, CHAT_LOAD_TIMEOUT);
+            } catch (e) {
+                console.warn('[Mine Recruiter] chat for ' + userId + ' still loading after '
+                    + CHAT_LOAD_TIMEOUT + 'ms; pasting anyway');
+            }
+        }
+
+        // Belt and braces: the loader going away is the fetch finishing, not
+        // necessarily the last render landing. A short quiet period covers that,
+        // and covers a future Torn build that drops the loader entirely — in
+        // which case this is the whole check rather than a top-up.
         const settled = await waitForChatQuiet(panel);
         if (!settled) {
             console.warn('[Mine Recruiter] chat for ' + userId
