@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mine Recruiter
 // @namespace    MonChoon_
-// @version      3.9.0
+// @version      3.9.1
 // @description  Adds recruit buttons to the User Search page. Opens chat and pre-fills recruitment message. Uses Torn HOF API for working stats enrichment with multi-key rotation.
 // @license      MIT
 // @author       MonChoon [2250591]
@@ -16,6 +16,14 @@
 // ==/UserScript==
 
 // CHANGELOG
+// 3.9.1 - FIX: 3.9.0 called recordDomAdditions()/dumpChatDiagnostics() but the
+//         block defining them was never written to the file — a two-part edit
+//         where the second half applied and the first did not. The result was a
+//         synchronous ReferenceError on every step-2 click, caught by the outer
+//         handler, which runs the clipboard fallback: the button jumped
+//         straight to "Copied - open chat manually" and no chat ever opened.
+//         `node --check` cannot catch this; an undefined function is valid
+//         syntax. The definitions are now present.
 // 3.9.0 - Use Torn's OWN loader element as the "conversation loaded" signal
 //         instead of inferring it. A captured open shows the panel mounting at
 //         t=0 already carrying <div class="... loader___ydkxj"> and that
@@ -416,6 +424,75 @@
             const t2 = document.getElementById('channel_panel_button:private-' + userId + '-' + myId);
             if (t2) t2.click();
         }
+    }
+
+    // =========================================================================
+    // DIAGNOSTICS  (off by default)
+    // =========================================================================
+    //
+    // Kept because this file has now been broken twice by Torn renaming things,
+    // and both times the expensive part was not writing the fix but working out
+    // WHICH of several identical-looking failures was happening. Guarded so it
+    // costs nothing when off.
+    //
+    // Turn on from the console:
+    //     GM_setValue('mine_debug', 'true')     // Tampermonkey storage panel
+    // or, for one page load only:
+    //     window.MINE_DEBUG = true
+    // =========================================================================
+    function debugOn() {
+        if (typeof window !== 'undefined' && window.MINE_DEBUG) return true;
+        try { return GM_getValue('mine_debug', 'false') === 'true'; } catch (e) { return false; }
+    }
+
+    function describeEl(el) {
+        return el.tagName.toLowerCase()
+            + (el.id ? '#' + el.id : '')
+            + (el.className ? '.' + String(el.className).trim().split(/\s+/).join('.') : '');
+    }
+
+    /**
+     * Record every element added to the DOM until stop().
+     *
+     * Timing a manual capture around a panel opening is near impossible by hand
+     * — the interesting state is gone before you can select it. Arm this BEFORE
+     * the action and read it back after.
+     */
+    function recordDomAdditions() {
+        if (!debugOn()) return { stop: function () { return []; } };
+        const added = [];
+        const obs = new MutationObserver(function (muts) {
+            for (const m of muts) {
+                for (const n of m.addedNodes) if (n.nodeType === 1) added.push(n);
+            }
+        });
+        obs.observe(document.documentElement, { childList: true, subtree: true });
+        return { stop: function () { obs.disconnect(); return added; } };
+    }
+
+    /** What the page looked like when a chat panel failed to appear. */
+    function dumpChatDiagnostics(userId, addedNodes) {
+        if (!debugOn()) return;
+        const chainOf = function (el) {
+            const parts = [];
+            let n = el;
+            while (n && n !== document.body && parts.length < 12) { parts.unshift(describeEl(n)); n = n.parentElement; }
+            return parts.join(' > ');
+        };
+        console.group('[Mine Recruiter] chat panel never appeared for ' + userId);
+        console.log('my user id:', getMyUserId());
+        console.log('mini profile present:', !!document.querySelector('.mini-profile-wrapper'));
+        console.log('div[id^="private-"]:', [].map.call(document.querySelectorAll('div[id^="private-"]'), describeEl));
+        console.log('tray buttons:', [].map.call(document.querySelectorAll('[id^="channel_panel_button"]'), function (e) { return e.id; }));
+        const added = addedNodes || [];
+        console.log('elements added during the press:', added.length);
+        const withInput = added.filter(function (n) {
+            return n.matches && (n.matches('textarea, [contenteditable]') || n.querySelector('textarea, [contenteditable]'));
+        });
+        console.log('  of those, carrying a text input:', withInput.length);
+        withInput.slice(0, 5).forEach(function (n, i) { console.log('  [' + i + '] ' + chainOf(n)); });
+        added.slice(0, 25).forEach(function (n, i) { console.log('    ' + i + ': ' + describeEl(n)); });
+        console.groupEnd();
     }
 
     // =========================================================================
