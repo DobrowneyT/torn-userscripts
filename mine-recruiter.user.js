@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mine Recruiter
 // @namespace    MonChoon_
-// @version      3.10.0
+// @version      3.11.0
 // @description  Adds recruit buttons to the User Search page. Opens chat and pre-fills recruitment message. Uses Torn HOF API for working stats enrichment with multi-key rotation.
 // @license      MIT
 // @author       MonChoon [2250591]
@@ -16,6 +16,21 @@
 // ==/UserScript==
 
 // CHANGELOG
+// 3.11.0 - $NAME in a message is replaced with the recruit's name.
+//         Resolved from the open chat panel's header first - that is the name
+//         Torn itself is showing for this conversation, so it cannot be the
+//         wrong person even if the search list re-sorted underneath us - then
+//         from the search row.
+//         ⚠️ The row fallback reads `.honor-text:not(.honor-text-svg)`, not the
+//         anchor text: Torn renders an honor bar as TWO copies of the name, a
+//         per-character SVG one and a plain one, so the anchor's textContent
+//         gives the name twice over.
+//         If the template asks for a name and none can be read, NOTHING is
+//         pasted and the button says so. "Hey $NAME," is worse than sending
+//         nothing - it is visibly a failed mail merge, shown to the one person
+//         being asked to judge whether this faction is worth joining.
+//         The modal previews the substitution against a real row on screen, so
+//         a mistyped token is caught before it reaches an inbox.
 // 3.10.0 - Five saved message presets, and no hardcoded default.
 //         The old DEFAULT_RECRUIT_MESSAGE baked one faction's pay rates and job
 //         link into tracked source, where it went stale silently and was simply
@@ -371,6 +386,13 @@
         .mine-preset-btn.filled   { background: #1a3a1a; color: #9f9; border-color: #3a7d3a; }
         .mine-preset-btn.selected { outline: 2px solid #4488ff; outline-offset: 1px; }
         .mine-preset-btn:hover    { border-color: #666; }
+
+        .mine-msg-hint { color: #888; font-size: 11px; line-height: 1.5; }
+        .mine-msg-hint code {
+            background: #2a2a2a; border: 1px solid #444; border-radius: 3px;
+            padding: 1px 4px; color: #9f9; font-size: 10px;
+        }
+        #mine-msg-preview { display: block; margin-top: 4px; color: #66aaff; }
     `;
     document.head.appendChild(style);
 
@@ -984,9 +1006,19 @@
             if (state === 'chat_open') {
                 const p = getChatPanel(userId);
                 const ta = findChatTextarea(p);
-                navigator.clipboard.writeText(RECRUIT_MESSAGE()).catch(function() {});
+                const message = messageFor(userId, p);
+                if (!message) {
+                    // The template wants a name and we could not read one.
+                    // Pasting "Hey $NAME," is worse than pasting nothing.
+                    btn.className = 'mine-recruit-btn warn'; btn.style.background = '';
+                    btn.textContent = '\u26A0 Could not read their name';
+                    btn.title = 'The message uses $NAME but the name could not be found on the page. Click to retry.';
+                    console.warn('[Mine Recruiter] $NAME unresolved for ' + userId);
+                    return;
+                }
+                navigator.clipboard.writeText(message).catch(function() {});
                 if (ta) {
-                    ta.focus(); setReactTextareaValue(ta, RECRUIT_MESSAGE());
+                    ta.focus(); setReactTextareaValue(ta, message);
                     recruitState[userId] = 'pasted'; btn.className = 'mine-recruit-btn send-ready'; btn.style.background = '';
                     btn.textContent = '\uD83D\uDCE8 Click to send';
                 } else {
@@ -1108,15 +1140,82 @@
         } catch(err) {
             console.warn('[Mine Recruiter] Error:', err.message);
             recruitState[userId] = 'idle'; btn.className = 'mine-recruit-btn ready'; btn.style.background = ''; btn.textContent = '\u26CF Recruit';
-            clipboardFallback(btn);
+            clipboardFallback(btn, userId);
         }
     }
 
-    function clipboardFallback(btn) {
-        navigator.clipboard.writeText(RECRUIT_MESSAGE()).then(() => {
+    function clipboardFallback(btn, userId) {
+        // Resolve $NAME here too — this path ends with a human pasting it by
+        // hand, and an unresolved token would go out exactly as typed.
+        const message = messageFor(userId, getChatPanel(userId)) || RECRUIT_MESSAGE();
+        navigator.clipboard.writeText(message).then(() => {
             btn.className = 'mine-recruit-btn sent'; btn.textContent = '\uD83D\uDCCB Copied \u2014 open chat manually';
             setTimeout(() => { btn.className = 'mine-recruit-btn ready'; btn.textContent = '\u26CF Recruit'; }, 5000);
         }).catch(() => { btn.className = 'mine-recruit-btn ready'; btn.textContent = '\u26CF Recruit'; alert('[Mine Recruiter] Could not copy to clipboard.'); });
+    }
+
+    // =========================================================================
+    // $NAME SUBSTITUTION
+    // =========================================================================
+
+    /** Does this message ask for a name? */
+    const NAME_TOKEN = /\$name\b/gi;
+
+    /**
+     * The target's display name, from the most trustworthy source available.
+     *
+     * Three sources, best first. The CHAT PANEL header wins because it is the
+     * name Torn itself is showing for this exact conversation — the panel we
+     * are about to paste into — so it cannot be the wrong person even if the
+     * search row was re-rendered or re-sorted underneath us.
+     *
+     * ⚠️ The search-row fallback reads `.honor-text:not(.honor-text-svg)`, not
+     * the anchor's text. Torn renders an honor bar as TWO copies of the name:
+     * a per-character SVG version (`.honor-text-svg`, one <span data-char>
+     * each) and a plain one. Taking the anchor's textContent concatenates both
+     * and yields the name twice over.
+     */
+    function targetDisplayName(userId, panel) {
+        const clean = (el) => (el && el.textContent ? el.textContent.trim() : '');
+
+        // 1. The open chat panel's header.
+        const fromPanel = panel && panel.querySelector('[class*="title___"]');
+        if (clean(fromPanel)) return clean(fromPanel);
+
+        const row = document.querySelector('li.user' + userId)
+            || document.querySelector('li[class*="user' + userId + '"]');
+        if (row) {
+            // 2. The plain half of the honor bar.
+            const plain = row.querySelector('.honor-text:not(.honor-text-svg)');
+            if (clean(plain)) return clean(plain);
+            // 3. The name link, with any SVG honor copy stripped out first.
+            const link = row.querySelector('a.user.name')
+                || row.querySelector('a[href*="profiles.php?XID=' + userId + '"]');
+            if (link) {
+                const copy = link.cloneNode(true);
+                copy.querySelectorAll('.honor-text-svg').forEach((n) => n.remove());
+                if (clean(copy)) return clean(copy);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The message to actually send, with $NAME resolved.
+     *
+     * Returns null when the message asks for a name we cannot find. Sending
+     * "Hey $NAME," is worse than sending nothing: it is visibly a mail merge
+     * that failed, to the one audience being asked to judge whether this
+     * faction is worth joining. The caller says so on the button instead.
+     */
+    function messageFor(userId, panel) {
+        const template = RECRUIT_MESSAGE();
+        if (!template) return null;
+        NAME_TOKEN.lastIndex = 0;
+        if (!NAME_TOKEN.test(template)) return template;
+        const name = targetDisplayName(userId, panel);
+        if (!name) return null;
+        return template.replace(NAME_TOKEN, name);
     }
 
     // =========================================================================
@@ -1432,6 +1531,11 @@
                 </div>
                 <input type="text" id="mine-preset-label" class="label-input" placeholder="Name for this preset (optional)">
                 <textarea id="mine-msg-textarea" spellcheck="true"></textarea>
+                <div class="mine-msg-hint">
+                    Write <code>$NAME</code> anywhere and it is replaced with the
+                    recruit's name when the message is sent.
+                    <span id="mine-msg-preview"></span>
+                </div>
                 <div class="mine-modal-btns">
                     <button id="mine-msg-store" class="btn-neutral" title="Write what is in the box into the highlighted preset slot">Save to preset</button>
                     <button id="mine-msg-cancel" class="btn-cancel">Cancel</button>
@@ -1442,6 +1546,7 @@
         document.body.appendChild(overlay);
         overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('visible'); });
         document.getElementById('mine-msg-cancel').addEventListener('click', () => overlay.classList.remove('visible'));
+        document.getElementById('mine-msg-textarea').addEventListener('input', renderMessagePreview);
         document.getElementById('mine-msg-store').addEventListener('click', () => {
             const text = document.getElementById('mine-msg-textarea').value.trim();
             if (!text) { alert('Nothing to save \u2014 the message box is empty.'); return; }
@@ -1506,8 +1611,30 @@
         selectedPreset = match >= 0 ? match : 0;
         document.getElementById('mine-preset-label').value = list[selectedPreset].label;
         renderPresetSlots();
+        renderMessagePreview();
         overlay.classList.add('visible');
         document.getElementById('mine-msg-textarea').focus();
+    }
+
+    /**
+     * Show what $NAME will become, using a real recruit from the current page.
+     *
+     * A placeholder you cannot see working is a placeholder people mistype and
+     * only discover in someone's inbox. This resolves against the first row on
+     * screen so the substitution is visible before it is ever sent.
+     */
+    function renderMessagePreview() {
+        const out = document.getElementById('mine-msg-preview');
+        const box = document.getElementById('mine-msg-textarea');
+        if (!out || !box) return;
+        NAME_TOKEN.lastIndex = 0;
+        if (!NAME_TOKEN.test(box.value)) { out.textContent = ''; return; }
+        const row = document.querySelector('.userlist-wrapper .user-info-list-wrap > li[class*="user"]');
+        const m = row && row.className.match(/\buser(\d+)\b/);
+        const sample = m ? targetDisplayName(m[1], null) : null;
+        out.textContent = sample
+            ? 'Preview with ' + sample + ': ' + box.value.replace(NAME_TOKEN, sample).split('\n')[0]
+            : '\u26A0 No recruit rows on screen to preview against.';
     }
 
     // =========================================================================
