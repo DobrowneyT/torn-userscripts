@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mine Recruiter
 // @namespace    MonChoon_
-// @version      3.9.1
+// @version      3.10.0
 // @description  Adds recruit buttons to the User Search page. Opens chat and pre-fills recruitment message. Uses Torn HOF API for working stats enrichment with multi-key rotation.
 // @license      MIT
 // @author       MonChoon [2250591]
@@ -16,6 +16,19 @@
 // ==/UserScript==
 
 // CHANGELOG
+// 3.10.0 - Five saved message presets, and no hardcoded default.
+//         The old DEFAULT_RECRUIT_MESSAGE baked one faction's pay rates and job
+//         link into tracked source, where it went stale silently and was simply
+//         wrong for anyone else running the script. "Reset to default" restored
+//         that stale text over whatever you had written.
+//         The modal now has five slots. Clicking one selects AND loads it;
+//         "Save to preset" writes the box into the highlighted slot; "Use this
+//         message" is what the recruit flow actually pastes. Slots can be named,
+//         because five blocks of similar advert text are indistinguishable
+//         otherwise, and a filled slot is coloured differently from an empty one.
+//         Clicking an EMPTY slot does not wipe the box - you are almost
+//         certainly about to save the draft you just typed into it.
+//         Any existing single message is migrated into slot 1 on first run.
 // 3.9.1 - FIX: 3.9.0 called recordDomAdditions()/dumpChatDiagnostics() but the
 //         block defining them was never written to the file — a two-part edit
 //         where the second half applied and the first did not. The result was a
@@ -78,13 +91,49 @@
     // =========================================================================
     // CONFIG
     // =========================================================================
-    const DEFAULT_RECRUIT_MESSAGE =
-        "5 Star Mine Hiring 50k+ stats. Great pay, greater perks and rotational Trains." +
-        "Pay 20-25x highest stat depending on stats. Message me your stats or Apply here: " +
-        "https://www.torn.com/joblist.php#/p=corpinfo&userID=2214797";
+    // =========================================================================
+    // MESSAGE PRESETS
+    // =========================================================================
+    //
+    // Five saved messages, and the one currently in use. There is deliberately
+    // NO hardcoded default any more: the old one carried one faction's pay
+    // rates and job link baked into tracked source, which went stale silently
+    // and was wrong for anyone else running the script.
+    //
+    // An unset slot is an empty string, and an empty active message means the
+    // recruit flow has nothing to paste — which the Message button says out
+    // loud rather than pasting a stale advert on someone's behalf.
+    const PRESET_COUNT = 5;
+    const PRESETS_STORE = 'mine_recruit_presets';
+    const ACTIVE_STORE  = 'mine_recruit_active';
 
-    function getRecruitMessage() { return GM_getValue('mine_recruit_message', DEFAULT_RECRUIT_MESSAGE); }
-    function setRecruitMessage(msg) { GM_setValue('mine_recruit_message', msg); }
+    function getPresets() {
+        try {
+            const raw = JSON.parse(GM_getValue(PRESETS_STORE, 'null'));
+            const out = Array.isArray(raw) ? raw.slice(0, PRESET_COUNT) : [];
+            while (out.length < PRESET_COUNT) out.push({ label: '', text: '' });
+            return out.map(function (p) {
+                return { label: String((p && p.label) || ''), text: String((p && p.text) || '') };
+            });
+        } catch (e) {
+            return Array.from({ length: PRESET_COUNT }, function () { return { label: '', text: '' }; });
+        }
+    }
+    function savePresets(list) { GM_setValue(PRESETS_STORE, JSON.stringify(list)); }
+
+    function getRecruitMessage() {
+        // Migrate the pre-3.10 single message into slot 1 once, so nobody loses
+        // the wording they were actually using.
+        const legacy = GM_getValue('mine_recruit_message', '');
+        if (legacy) {
+            const list = getPresets();
+            if (!list[0].text) { list[0] = { label: 'Imported', text: legacy }; savePresets(list); }
+            GM_setValue('mine_recruit_message', '');
+            return legacy;
+        }
+        return GM_getValue(ACTIVE_STORE, '');
+    }
+    function setRecruitMessage(msg) { GM_setValue(ACTIVE_STORE, msg); }
     function RECRUIT_MESSAGE() { return getRecruitMessage(); }
 
     // Torn's React panels mount slower than they used to. 4000 was too tight.
@@ -308,6 +357,20 @@
             width: 100%; box-sizing: border-box;
         }
         .label-input:focus { outline: none; border-color: #3a7d3a; }
+
+        .mine-preset-bar { display: flex; align-items: center; gap: 8px; }
+        .mine-preset-hint { color: #888; font-size: 11px; }
+        #mine-preset-slots { display: flex; gap: 5px; }
+        .mine-preset-btn {
+            width: 26px; height: 26px; border-radius: 4px; cursor: pointer;
+            font-size: 11px; font-weight: bold; border: 1px solid #444;
+            background: #2a2a2a; color: #777;
+        }
+        /* A filled slot has to look different from an empty one, or five
+           identical numbers tell you nothing about where your messages are. */
+        .mine-preset-btn.filled   { background: #1a3a1a; color: #9f9; border-color: #3a7d3a; }
+        .mine-preset-btn.selected { outline: 2px solid #4488ff; outline-offset: 1px; }
+        .mine-preset-btn:hover    { border-color: #666; }
     `;
     document.head.appendChild(style);
 
@@ -879,6 +942,18 @@
         try {
             const myId = getMyUserId();
             if (!myId) throw new Error('Could not determine your user ID');
+
+            // Removing the hardcoded default created a state that could not
+            // exist before: nothing configured to send. Say so on the button
+            // rather than opening a chat and pasting an empty string, which
+            // looks exactly like the script being broken.
+            if (!RECRUIT_MESSAGE()) {
+                btn.className = 'mine-recruit-btn warn'; btn.style.background = '';
+                btn.textContent = '\u26A0 Set a message first';
+                btn.title = 'Open "Message" in the Mine Recruiter header and save one.';
+                return;
+            }
+
             const state = recruitState[userId] || 'idle';
 
             if (state === 'sent') {
@@ -1350,20 +1425,30 @@
         overlay.id = 'mine-msg-overlay'; overlay.className = 'mine-overlay';
         overlay.innerHTML = `
             <div class="mine-modal">
-                <h3>&#9999; Edit Recruitment Message</h3>
+                <h3>&#9999; Recruitment Message</h3>
+                <div class="mine-preset-bar">
+                    <span class="mine-preset-hint">Presets:</span>
+                    <span id="mine-preset-slots"></span>
+                </div>
+                <input type="text" id="mine-preset-label" class="label-input" placeholder="Name for this preset (optional)">
                 <textarea id="mine-msg-textarea" spellcheck="true"></textarea>
                 <div class="mine-modal-btns">
-                    <button id="mine-msg-reset" class="btn-neutral">Reset to default</button>
+                    <button id="mine-msg-store" class="btn-neutral" title="Write what is in the box into the highlighted preset slot">Save to preset</button>
                     <button id="mine-msg-cancel" class="btn-cancel">Cancel</button>
-                    <button id="mine-msg-save" class="btn-save">Save</button>
+                    <button id="mine-msg-save" class="btn-save" title="Use this message for recruiting">Use this message</button>
                 </div>
             </div>
         `;
         document.body.appendChild(overlay);
         overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('visible'); });
         document.getElementById('mine-msg-cancel').addEventListener('click', () => overlay.classList.remove('visible'));
-        document.getElementById('mine-msg-reset').addEventListener('click', () => {
-            if (confirm('Reset to default message?')) document.getElementById('mine-msg-textarea').value = DEFAULT_RECRUIT_MESSAGE;
+        document.getElementById('mine-msg-store').addEventListener('click', () => {
+            const text = document.getElementById('mine-msg-textarea').value.trim();
+            if (!text) { alert('Nothing to save \u2014 the message box is empty.'); return; }
+            const list = getPresets();
+            list[selectedPreset] = { label: document.getElementById('mine-preset-label').value.trim(), text };
+            savePresets(list);
+            renderPresetSlots();
         });
         document.getElementById('mine-msg-save').addEventListener('click', () => {
             const v = document.getElementById('mine-msg-textarea').value.trim();
@@ -1372,9 +1457,55 @@
         });
     }
 
+    // Which slot the label field and "Save to preset" are pointed at. Clicking a
+    // slot both selects it AND loads it, so one click does the obvious thing.
+    let selectedPreset = 0;
+
+    function renderPresetSlots() {
+        const host = document.getElementById('mine-preset-slots');
+        if (!host) return;
+        const list = getPresets();
+        host.innerHTML = '';
+        list.forEach(function (preset, i) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'mine-preset-btn'
+                + (i === selectedPreset ? ' selected' : '')
+                + (preset.text ? ' filled' : ' empty');
+            b.textContent = String(i + 1);
+            // The label is the whole point of naming a slot: it is how you tell
+            // five blocks of similar-looking advert text apart at a glance.
+            b.title = preset.text
+                ? (preset.label || 'Preset ' + (i + 1)) + '\n\n' + preset.text.slice(0, 200)
+                : 'Empty slot \u2014 put text in the box and press "Save to preset"';
+            b.addEventListener('click', function () {
+                selectedPreset = i;
+                const current = getPresets()[i];
+                if (current.text) {
+                    document.getElementById('mine-msg-textarea').value = current.text;
+                    document.getElementById('mine-preset-label').value = current.label;
+                } else {
+                    // Do NOT wipe what is in the box for an empty slot — you are
+                    // almost certainly about to save the draft you just typed.
+                    document.getElementById('mine-preset-label').value = '';
+                }
+                renderPresetSlots();
+            });
+            host.appendChild(b);
+        });
+    }
+
     function openMessageModal() {
         const overlay = document.getElementById('mine-msg-overlay'); if (!overlay) return;
-        document.getElementById('mine-msg-textarea').value = getRecruitMessage();
+        const active = getRecruitMessage();
+        document.getElementById('mine-msg-textarea').value = active;
+        // Open on the slot whose text is in use, so the label field and the
+        // save button start pointed somewhere honest.
+        const list = getPresets();
+        const match = list.findIndex(function (p) { return p.text && p.text === active; });
+        selectedPreset = match >= 0 ? match : 0;
+        document.getElementById('mine-preset-label').value = list[selectedPreset].label;
+        renderPresetSlots();
         overlay.classList.add('visible');
         document.getElementById('mine-msg-textarea').focus();
     }
