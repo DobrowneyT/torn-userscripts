@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mine Recruiter
 // @namespace    MonChoon_
-// @version      3.11.0
+// @version      3.11.1
 // @description  Adds recruit buttons to the User Search page. Opens chat and pre-fills recruitment message. Uses Torn HOF API for working stats enrichment with multi-key rotation.
 // @license      MIT
 // @author       MonChoon [2250591]
@@ -11,11 +11,35 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        unsafeWindow
-// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.js
-// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.js
+// @downloadURL  https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.user.js
+// @updateURL    https://github.com/DobrowneyT/torn-userscripts/raw/main/mine-recruiter.user.js
 // ==/UserScript==
 
 // CHANGELOG
+// 3.11.1 - FIX: step 2 stopped DETECTING the chat it had just opened, because
+//         Torn's Chat 3.1 renamed the panel root. 3.0 keyed it
+//         `private-<me>-<them>`; 3.1 keys it `<them>` alone, with no prefix.
+//         Nothing else moved - every in-panel selector matches a class PREFIX
+//         (scrollWrapper___, iconWrapper___, closeIcon___, title___) and those
+//         all survived - so the click worked, the window opened, and the script
+//         then waited out the full 8s WAIT_TIMEOUT staring past a panel that
+//         was on screen the whole time, before falling back to the clipboard.
+//         Both id schemes are now accepted, since a userscript cannot know
+//         which build a player is served.
+//         ⚠️ A bare user id is a much weaker selector than a prefixed one, and
+//         this script runs on a page full of user ids. A 3.1 candidate must
+//         also LOOK like a panel (a textarea or a scrollWrapper___ inside it)
+//         or the script would happily paste into an unrelated element and
+//         report the message sent.
+//         The tray fast path moved to findTrayButton(), which tries the 3.0
+//         ids and a guessed 3.1 one. The tray was NOT in the captured DOM, so
+//         that id is unverified - harmless, because a missed exact-id lookup
+//         just falls through to the mini-profile route.
+//         Also: @downloadURL and @updateURL pointed at `mine-recruiter.js`,
+//         but the file in the repo is `mine-recruiter.user.js` - both 404, so
+//         Tampermonkey has never been able to auto-update this script. Fixed,
+//         which only takes effect from the NEXT version onward: this one has to
+//         be installed by hand.
 // 3.11.0 - $NAME in a message is replaced with the recruit's name.
 //         Resolved from the open chat panel's header first - that is the name
 //         Torn itself is showing for this conversation, so it cannot be the
@@ -474,12 +498,77 @@
     // =========================================================================
     // CHAT PANEL HELPERS
     // =========================================================================
+    //
+    // ⚠️ Chat 3.1 renamed the panel ROOT, and that rename is the whole of what
+    // this script needs to care about:
+    //
+    //     3.0   <div id="private-2250591-2576356" class="root___...">
+    //     3.1   <div id="2576356"                 class="root___... visible___...">
+    //
+    // The id is now just the correspondent - no "private-" prefix, and no
+    // mention of us at all. Every selector that reads INSIDE the panel still
+    // matches, because they were all written against a class PREFIX rather
+    // than a full hash: scrollWrapper___, textarea, iconWrapper___,
+    // closeIcon___, title___ are all unchanged in 3.1.
+    //
+    // That combination is why the failure looked so odd. Step 2 clicked, the
+    // chat genuinely opened, and then the script sat for the full 8s
+    // WAIT_TIMEOUT unable to see a window that was plainly on screen, and gave
+    // up to the clipboard fallback.
+    //
+    // Both schemes are accepted. A userscript cannot assume which build a given
+    // player is served, and Torn has rolled a chat version back before.
+
+    /**
+     * Does this element look like a chat panel?
+     *
+     * ⚠️ Needed only for the 3.1 scheme. A bare user id is a far weaker selector
+     * than one carrying a "private-" prefix, and the User Search page this
+     * script runs on is a page FULL of user ids - any element Torn happens to
+     * key by the same number would otherwise be accepted as the panel. The
+     * script would then "succeed", paste into nothing, and report it sent.
+     */
+    function isChatPanel(el) {
+        return !!(el && (el.querySelector('textarea')
+            || el.querySelector('[class*="scrollWrapper___"]')));
+    }
+
+    /** A minimised or hidden panel sorts after a visible one. */
+    function panelIsVisible(el) {
+        return !/\bhidden___/.test(el.className || '') && el.offsetWidth > 0;
+    }
+
+    /** Every panel for this conversation, best candidate first. */
+    function chatPanelsFor(userId) {
+        const uid = String(userId);
+        const found = [];
+        const push = function (el) { if (el && found.indexOf(el) === -1) found.push(el); };
+
+        // Chat 3.0. The prefix makes this unambiguous, so no shape check.
+        [].forEach.call(document.querySelectorAll('div[id^="private-"]'), function (el) {
+            if (el.id.indexOf(uid) !== -1) push(el);
+        });
+
+        // Chat 3.1. Guarded on a numeric id so the attribute selector can never
+        // be malformed, and shape-checked per isChatPanel above.
+        if (/^\d+$/.test(uid)) {
+            [].forEach.call(document.querySelectorAll('div[id="' + uid + '"]'), function (el) {
+                if (isChatPanel(el)) push(el);
+            });
+        }
+
+        // Stable sort, so this only lifts visible panels above hidden ones and
+        // otherwise leaves DOM order alone. It does not FILTER: a panel caught
+        // mid-open is still the panel we want.
+        return found.sort(function (a, b) { return panelIsVisible(b) - panelIsVisible(a); });
+    }
+
     function waitForChatPanel(userId) {
         return new Promise(function(resolve, reject) {
             const start = Date.now();
             function tick() {
-                const panels = document.querySelectorAll('div[id^="private-"]');
-                for (let i = 0; i < panels.length; i++) { if (panels[i].id.includes(userId)) return resolve(panels[i]); }
+                const panel = chatPanelsFor(userId)[0];
+                if (panel) return resolve(panel);
                 if (Date.now() - start > WAIT_TIMEOUT) return reject(new Error('Panel did not open'));
                 setTimeout(tick, WAIT_POLL);
             }
@@ -493,8 +582,29 @@
             const a = document.getElementById('private-' + myId + '-' + userId); if (a) return a;
             const b = document.getElementById('private-' + userId + '-' + myId); if (b) return b;
         }
-        const panels = document.querySelectorAll('div[id^="private-"]');
-        for (let i = 0; i < panels.length; i++) { if (panels[i].id.includes(userId)) return panels[i]; }
+        return chatPanelsFor(userId)[0] || null;
+    }
+
+    /**
+     * The tray button for a conversation that is already open.
+     *
+     * ⚠️ The 3.1 form is a GUESS - the tray was not in the captured DOM, only
+     * the panel was. It costs nothing to guess here: these are exact
+     * getElementById lookups, so a wrong id simply misses and the caller falls
+     * through to the mini-profile route, which is the normal path anyway.
+     */
+    function findTrayButton(userId) {
+        const myId = getMyUserId();
+        const ids = [];
+        if (myId) {
+            ids.push('channel_panel_button:private-' + myId + '-' + userId);
+            ids.push('channel_panel_button:private-' + userId + '-' + myId);
+        }
+        ids.push('channel_panel_button:' + userId);
+        for (let i = 0; i < ids.length; i++) {
+            const el = document.getElementById(ids[i]);
+            if (el) return el;
+        }
         return null;
     }
 
@@ -502,13 +612,8 @@
         if (!panel) return;
         const cb = findCloseButton(panel);
         if (cb) { cb.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); return; }
-        const myId = getMyUserId();
-        if (myId) {
-            const t1 = document.getElementById('channel_panel_button:private-' + myId + '-' + userId);
-            if (t1) { t1.click(); return; }
-            const t2 = document.getElementById('channel_panel_button:private-' + userId + '-' + myId);
-            if (t2) t2.click();
-        }
+        const tray = findTrayButton(userId);
+        if (tray) tray.click();
     }
 
     // =========================================================================
@@ -567,7 +672,12 @@
         console.group('[Mine Recruiter] chat panel never appeared for ' + userId);
         console.log('my user id:', getMyUserId());
         console.log('mini profile present:', !!document.querySelector('.mini-profile-wrapper'));
-        console.log('div[id^="private-"]:', [].map.call(document.querySelectorAll('div[id^="private-"]'), describeEl));
+        console.log('chat 3.0  div[id^="private-"]:', [].map.call(document.querySelectorAll('div[id^="private-"]'), describeEl));
+        if (/^\d+$/.test(String(userId))) {
+            const bare = [].slice.call(document.querySelectorAll('div[id="' + userId + '"]'));
+            console.log('chat 3.1  div[id="' + userId + '"]:', bare.map(describeEl));
+            console.log('  of those, shaped like a panel:', bare.filter(isChatPanel).length);
+        }
         console.log('tray buttons:', [].map.call(document.querySelectorAll('[id^="channel_panel_button"]'), function (e) { return e.id; }));
         const added = addedNodes || [];
         console.log('elements added during the press:', added.length);
@@ -1029,7 +1139,7 @@
             }
 
             // Tray fast path
-            const trayBtn = document.getElementById('channel_panel_button:private-' + myId + '-' + userId);
+            const trayBtn = findTrayButton(userId);
             if (trayBtn && recruitState[userId] !== 'mini_open') {
                 btn.className = 'mine-recruit-btn loading'; btn.textContent = '\u23F3 Opening...';
                 trayBtn.click();
